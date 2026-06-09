@@ -52,6 +52,15 @@ class StateStore:
                 f"eraTW cached payload archive is missing; ignoring cache: {payload.archive.path}"
             )
             return None
+        archive_dir = (self.data_dir / "archives").resolve()
+        try:
+            payload.archive.path.resolve().relative_to(archive_dir)
+        except ValueError:
+            logger.warning(
+                "eraTW cached payload archive is outside current data archive dir; "
+                f"ignoring cache: {payload.archive.path}"
+            )
+            return None
         return payload
 
     def write_last_payload(self, payload: UpdatePayload) -> None:
