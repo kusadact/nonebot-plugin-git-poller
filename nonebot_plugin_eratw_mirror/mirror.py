@@ -52,7 +52,7 @@ class MirrorService:
                 if not commits:
                     logger.warning("eraTW compare returned no commits; falling back to branch head")
                     commits = [head]
-                archive = await build_encrypted_archive(client, head.id, head.short_id, self.config)
+                archive = await build_encrypted_archive(head.id, head.short_id, self.config)
                 changelog = extract_changelog_from_diffs(diffs)
                 payload = UpdatePayload(
                     target_sha=head.id,
@@ -91,7 +91,7 @@ class MirrorService:
         logger.info(f"eraTW preparing single commit payload: {sha[:8]}")
         commit = await client.get_commit(sha)
         diffs = await client.get_commit_diffs(sha)
-        archive = await build_encrypted_archive(client, commit.id, commit.short_id, self.config)
+        archive = await build_encrypted_archive(commit.id, commit.short_id, self.config)
         changelog = extract_changelog_from_diffs(diffs)
         logger.info(
             f"eraTW single payload ready for {commit.short_id}: "

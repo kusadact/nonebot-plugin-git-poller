@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import inspect
-from pathlib import Path
 from typing import Any
 
 import httpx
@@ -77,19 +76,6 @@ class GitGudClient:
         )
         logger.info(f"eraTW fetched {len(data)} diffs for commit {sha[:8]}")
         return list(data)
-
-    async def download_archive(self, sha: str, destination: Path) -> None:
-        client = self._require_client()
-        destination.parent.mkdir(parents=True, exist_ok=True)
-        url = self._url(f"/projects/{self.config.eratw_project_id}/repository/archive.zip")
-        logger.debug(f"eraTW archive download URL: {url}?sha={sha}")
-        async with client.stream("GET", url, params={"sha": sha}) as response:
-            response.raise_for_status()
-            with destination.open("wb") as file:
-                async for chunk in response.aiter_bytes():
-                    file.write(chunk)
-        if destination.stat().st_size <= 0:
-            raise RuntimeError(f"Downloaded archive is empty: {destination}")
 
     async def _get_json(self, path: str, params: dict[str, Any] | None = None) -> Any:
         response = await self._require_client().get(self._url(path), params=params)

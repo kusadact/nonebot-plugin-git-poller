@@ -7,6 +7,7 @@ from nonebot import get_plugin_config
 class Config(BaseModel):
     eratw_project_id: int = 28180
     eratw_project_url: str = "https://gitgud.io/era-games-zh/touhou/eratw-sub-modding"
+    eratw_git_url: str | None = None
     eratw_api_base: str = "https://gitgud.io/api/v4"
     eratw_branch: str = "main"
 
@@ -19,7 +20,8 @@ class Config(BaseModel):
     eratw_request_timeout: float = 60.0
 
     eratw_archive_password: str = "eratoho"
-    eratw_7z_path: str | None = None
+    eratw_git_depth: int = 1
+    eratw_git_timeout: float = 1800.0
     eratw_file_base_url: str | None = None
     eratw_file_route_prefix: str = "/eratw/files"
     eratw_file_token: str | None = None

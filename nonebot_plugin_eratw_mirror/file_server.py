@@ -5,7 +5,7 @@ from secrets import token_urlsafe
 from urllib.parse import quote, urlencode
 
 from nonebot import get_driver, logger
-from nonebot_plugin_localstore import get_plugin_cache_dir
+from nonebot_plugin_localstore import get_plugin_data_dir
 
 from .config import Config
 
@@ -31,7 +31,7 @@ def register_archive_file_route(config: Config) -> None:
             logger.warning(f"eraTW archive download rejected for unsafe filename: {filename}")
             return Response(status_code=404)
 
-        archive_dir = (get_plugin_cache_dir() / "archives").resolve()
+        archive_dir = (get_plugin_data_dir() / "archives").resolve()
         archive_path = (archive_dir / filename).resolve()
         try:
             archive_path.relative_to(archive_dir)
