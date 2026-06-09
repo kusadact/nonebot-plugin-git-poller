@@ -19,6 +19,7 @@ import py7zr
 
 
 BUILD_LOCK = Lock()
+ARCHIVE_CACHE_VERSION = 1
 
 
 class WorkerConfig:
@@ -141,9 +142,20 @@ def build_archive(payload: dict, base_url: str) -> dict:
     work_dir = CONFIG.cache_dir / "work" / repo_key / sha
     source = work_dir / f"eratw-sub-modding-{short_sha}"
     archive_path = output_dir / f"eratw-sub-modding-{short_sha}.7z"
+    metadata_path = _archive_metadata_path(archive_path)
 
-    if archive_path.exists() and archive_path.stat().st_size > 0:
-        return _archive_response(archive_path, repo_key, password, base_url)
+    cached_archive = _cached_archive_response(
+        archive_path,
+        metadata_path,
+        sha,
+        git_url,
+        branch,
+        password,
+        base_url,
+        repo_key,
+    )
+    if cached_archive is not None:
+        return cached_archive
 
     output_dir.mkdir(parents=True, exist_ok=True)
     _ensure_git_repo(repo_dir, git_url, branch, git_depth, proxy)
@@ -158,9 +170,15 @@ def build_archive(payload: dict, base_url: str) -> dict:
     tmp_archive = archive_path.with_suffix(".7z.tmp")
     if tmp_archive.exists():
         tmp_archive.unlink()
-    _write_7z(source, tmp_archive, password)
-    tmp_archive.replace(archive_path)
-    return _archive_response(archive_path, repo_key, password, base_url)
+    try:
+        _write_7z(source, tmp_archive, password)
+        tmp_archive.replace(archive_path)
+    finally:
+        if tmp_archive.exists():
+            tmp_archive.unlink()
+    response = _archive_response(archive_path, repo_key, password, base_url)
+    _write_archive_metadata(metadata_path, sha, git_url, branch, password, response)
+    return response
 
 
 def _ensure_git_repo(repo_dir: Path, git_url: str, branch: str, depth: int, proxy: str) -> None:
@@ -259,6 +277,81 @@ def _archive_response(path: Path, repo_key: str, password: str, base_url: str) -
     }
 
 
+def _cached_archive_response(
+    archive_path: Path,
+    metadata_path: Path,
+    sha: str,
+    git_url: str,
+    branch: str,
+    password: str,
+    base_url: str,
+    repo_key: str,
+) -> dict | None:
+    if not archive_path.exists() or archive_path.stat().st_size <= 0:
+        return None
+    metadata = _read_archive_metadata(metadata_path)
+    if metadata is None:
+        return None
+    expected = _archive_cache_key(sha, git_url, branch, password)
+    for key, value in expected.items():
+        if metadata.get(key) != value:
+            return None
+    response = _archive_response(archive_path, repo_key, password, base_url)
+    if int(metadata.get("archive_size") or -1) != response["size"]:
+        return None
+    if str(metadata.get("archive_sha256") or "") != response["sha256"]:
+        return None
+    return response
+
+
+def _archive_cache_key(sha: str, git_url: str, branch: str, password: str) -> dict[str, object]:
+    return {
+        "version": ARCHIVE_CACHE_VERSION,
+        "commit_sha": sha,
+        "git_url": git_url,
+        "branch": branch,
+        "password_sha256": _text_sha256(password),
+    }
+
+
+def _read_archive_metadata(path: Path) -> dict[str, object] | None:
+    if not path.exists():
+        return None
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except Exception:
+        return None
+    if not isinstance(data, dict):
+        return None
+    return data
+
+
+def _write_archive_metadata(
+    path: Path,
+    sha: str,
+    git_url: str,
+    branch: str,
+    password: str,
+    response: dict,
+) -> None:
+    data = {
+        **_archive_cache_key(sha, git_url, branch, password),
+        "archive_name": response["name"],
+        "archive_size": response["size"],
+        "archive_sha256": response["sha256"],
+    }
+    tmp_path = path.with_suffix(f"{path.suffix}.tmp")
+    tmp_path.write_text(
+        json.dumps(data, ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
+    tmp_path.replace(path)
+
+
+def _archive_metadata_path(path: Path) -> Path:
+    return path.with_suffix(f"{path.suffix}.json")
+
+
 def _with_git_env(proxy: str, func, *args, **kwargs):
     updates = {"GIT_TERMINAL_PROMPT": "0"}
     if proxy:
@@ -332,6 +425,10 @@ def _sha256(path: Path) -> str:
         for chunk in iter(lambda: file.read(1024 * 1024), b""):
             digest.update(chunk)
     return digest.hexdigest()
+
+
+def _text_sha256(value: str) -> str:
+    return hashlib.sha256(value.encode("utf-8")).hexdigest()
 
 
 class _NullBinaryWriter:
