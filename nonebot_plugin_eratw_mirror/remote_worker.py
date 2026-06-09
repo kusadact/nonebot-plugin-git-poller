@@ -24,14 +24,13 @@ async def build_remote_archive(
         "git_url": _git_url(config),
         "branch": config.eratw_branch,
         "archive_password": config.eratw_archive_password,
-        "git_depth": config.eratw_git_depth,
-        "git_timeout": config.eratw_git_timeout,
+        "git_depth": 1,
         "proxy": config.eratw_proxy,
     }
     headers = _worker_headers(config)
     logger.info(f"eraTW requesting archive worker for {short_sha}: {base_url}")
     async with httpx.AsyncClient(
-        timeout=httpx.Timeout(config.eratw_worker_timeout),
+        timeout=httpx.Timeout(config.eratw_timeout),
         follow_redirects=True,
     ) as client:
         response = await client.post(f"{base_url}/build", json=payload, headers=headers)

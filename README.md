@@ -15,43 +15,29 @@ GitGud eraTW 魔改仓库更新搬运插件。
 
 在 NoneBot `.env` 中配置：
 
-```bash
-# 自动推送群白名单。为空时不会自动推送。
-eratw_group_ids=[123456789]
+| 配置项 | 必填 | 默认值 | 说明 |
+| --- | --- | --- | --- |
+| `eratw_group_ids` | 否 | `[]` | 自动推送群白名单；为空时不会自动推送。 |
+| `eratw_schedule` | 否 | `daily@04:00` | 定时检查规则；留空关闭自动推送。支持 `daily@HH:MM`、`weekly@mon,thu@HH:MM`、`interval_days@2@HH:MM`。 |
+| `eratw_schedule_timezone` | 否 | `Asia/Shanghai` | 定时任务时区。 |
+| `eratw_proxy` | 否 | 空 | GitGud API 和 Git 拉取使用的代理，例如 `http://127.0.0.1:7890`。 |
+| `eratw_archive_password` | 否 | `eratoho` | 生成 7z 压缩包时使用的密码。 |
+| `eratw_timeout` | 否 | `3600` | 超时时间，单位秒；用于请求远端 worker 和群文件上传 API 等长耗时操作。 |
+| `API_TIMEOUT` | 建议 | `3600` | NoneBot/适配器全局 API 超时，不是本插件配置项；建议填写并与 `eratw_timeout` 保持一致，不填写时大文件上传容易被默认超时提前中断。 |
+| `eratw_worker_base_url` | 是 | 空 | 远端 worker 地址，例如 `http://worker.example:18721`。 |
+| `eratw_worker_token` | 建议 | 空 | 远端 worker 鉴权 token；worker 设置了 `ERATW_WORKER_TOKEN` 时必须一致。 |
 
-# 定时检查。留空时关闭自动推送。
-# daily@03:30: 每天 03:30
-# weekly@mon,thu@03:30: 每周一、周四 03:30
-# interval_days@2@03:30: 从下一个 03:30 开始，每 2 天一次
+`example.env`:
+
+```dotenv
+eratw_group_ids=[123456789, 987654321]
 eratw_schedule="daily@04:00"
-eratw_schedule_timezone="Asia/Shanghai"
-
-# 可选代理，例如 http://127.0.0.1:7890
 eratw_proxy=""
-
-# 7z 密码，默认 eratoho
 eratw_archive_password="eratoho"
-
-# Git 拉取深度。1 表示浅克隆/浅 fetch，<=0 表示完整历史。
-eratw_git_depth=1
-
-# Git 拉取/导出超时，单位秒。
-eratw_git_timeout=1800
-
-# 可选：覆盖 Git 拉取地址。默认由 eratw_project_url 自动追加 .git。
-eratw_git_url=""
-
-# 远端 worker。必须配置。
+eratw_timeout=3600
+API_TIMEOUT=3600
 eratw_worker_base_url="http://worker.example:18721"
 eratw_worker_token="change-me"
-eratw_worker_timeout=1800
-
-# 上传群文件 API 等待时间，单位秒。大文件建议 1800-7200。
-eratw_upload_api_timeout=3600
-
-# 合并转发节点展示 QQ 和昵称
-eratw_node_user_id=2854196310
-eratw_node_nickname="eraTW 更新"
 ```
 
 ## 指令
@@ -103,7 +89,7 @@ worker 持久数据：
 
 `upload_group_file` 实际由 OneBot/NapCat 执行。worker 返回的 `download_url` 必须能被 NapCat 访问；如果 NapCat 和 worker 在同一台 Docker 主机上，可以让 `ERATW_WORKER_PUBLIC_BASE_URL` 指向 NapCat 容器可访问的主机地址。
 
-大文件上传时，OneBot API 调用会长时间不返回。插件默认把 `upload_group_file` 的等待时间设为 3600 秒；如果你的 NoneBot 或适配器仍然提前超时，也可以在 `.env` 里额外设置 `API_TIMEOUT=3600`。
+大文件上传时，OneBot API 调用会长时间不返回。插件默认用 `eratw_timeout=3600` 等待 Git 操作和 `upload_group_file`；同时建议在 `.env` 里设置 `API_TIMEOUT=3600`，避免 NoneBot 或适配器的全局 API 超时先断开。
 
 ## 开发
 
