@@ -89,7 +89,7 @@ worker 持久数据：
 
 `upload_group_file` 实际由 OneBot/NapCat 执行。worker 返回的 `download_url` 必须能被 NapCat 访问；如果 NapCat 和 worker 在同一台 Docker 主机上，可以让 `ERATW_WORKER_PUBLIC_BASE_URL` 指向 NapCat 容器可访问的主机地址。
 
-大文件上传时，OneBot API 调用会长时间不返回。插件默认用 `eratw_timeout=3600` 等待 Git 操作和 `upload_group_file`；同时建议在 `.env` 里设置 `API_TIMEOUT=3600`，避免 NoneBot 或适配器的全局 API 超时先断开。
+大文件上传时，OneBot API 调用会长时间不返回。插件默认用 `eratw_timeout=3600` 等待 Git 操作和 `upload_group_file`；同时建议在 `.env` 里填写 `API_TIMEOUT=3600`，否则 NoneBot 或适配器的全局 API 超时可能先断开，导致上传失败。
 
 ## 开发
 
