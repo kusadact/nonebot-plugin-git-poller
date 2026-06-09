@@ -4,6 +4,7 @@ from nonebot import logger
 from nonebot.adapters.onebot.v11 import Bot, Message, MessageSegment
 
 from .config import Config
+from .file_server import build_archive_download_url
 from .models import UpdatePayload
 
 
@@ -45,6 +46,18 @@ def build_forward_nodes(
 
 
 async def send_payload_to_group(bot: Bot, group_id: int, payload: UpdatePayload, config: Config) -> None:
+    upload_source = build_archive_download_url(payload.archive.path, config)
+    if upload_source:
+        logger.info(
+            f"eraTW archive upload source for group {group_id} uses HTTP route: "
+            f"{upload_source.split('?', 1)[0]}"
+        )
+    else:
+        upload_source = str(payload.archive.path)
+        logger.warning(
+            "eraTW eratw_file_base_url is not configured; falling back to local archive path. "
+            "This only works when the OneBot implementation can read the same filesystem."
+        )
     logger.info(
         f"eraTW uploading archive to group {group_id}: "
         f"{payload.archive.name} ({payload.archive.size / 1024 / 1024:.2f} MiB)"
@@ -52,7 +65,7 @@ async def send_payload_to_group(bot: Bot, group_id: int, payload: UpdatePayload,
     await bot.call_api(
         "upload_group_file",
         group_id=int(group_id),
-        file=str(payload.archive.path),
+        file=upload_source,
         name=payload.archive.name,
     )
     logger.info(f"eraTW archive uploaded to group {group_id}: {payload.archive.name}")

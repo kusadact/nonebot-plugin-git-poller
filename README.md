@@ -31,6 +31,15 @@ eratw_archive_password="eratoho"
 # 7z/7zz/7za 路径。为空时自动查找。
 eratw_7z_path=""
 
+# 群文件上传使用的临时 HTTP 下载基址。
+# Bot 和 OneBot/NapCat 不在同一个文件系统时必须配置。
+# Docker compose 中 NapCat 与 NoneBot 同网络时常见写法：
+eratw_file_base_url="http://nonebot:8088"
+
+# 临时下载路由和 token。token 为空时插件每次启动自动生成。
+eratw_file_route_prefix="/eratw/files"
+eratw_file_token=""
+
 # 合并转发节点展示 QQ 和昵称
 eratw_node_user_id=2854196310
 eratw_node_nickname="eraTW 更新"
@@ -61,6 +70,8 @@ eratw_node_nickname="eraTW 更新"
 ## 部署注意
 
 运行插件的环境需要有 `7zz`、`7z` 或 `7za`。如果 Bot 跑在 Docker 里，需要在镜像中安装 p7zip/7zip，或者把 `eratw_7z_path` 配置为容器内可执行文件路径。
+
+`upload_group_file` 实际由 OneBot 实现端执行。Bot 与 OneBot/NapCat 分容器部署时，OneBot 端无法读取 Bot 容器内的 `/workspace/...` 路径，需要配置 `eratw_file_base_url`，让 OneBot 通过 HTTP 下载插件生成的 7z。
 
 ## 开发
 

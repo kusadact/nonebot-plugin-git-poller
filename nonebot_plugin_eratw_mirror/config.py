@@ -19,6 +19,9 @@ class Config(BaseModel):
 
     eratw_archive_password: str = "eratoho"
     eratw_7z_path: str | None = None
+    eratw_file_base_url: str | None = None
+    eratw_file_route_prefix: str = "/eratw/files"
+    eratw_file_token: str | None = None
 
     eratw_node_user_id: int = 2854196310
     eratw_node_nickname: str = "eraTW 更新"
@@ -27,4 +30,3 @@ class Config(BaseModel):
 
 
 plugin_config = get_plugin_config(Config)
-
