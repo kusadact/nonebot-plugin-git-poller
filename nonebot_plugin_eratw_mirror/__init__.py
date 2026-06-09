@@ -13,7 +13,6 @@ require("nonebot_plugin_localstore")
 from nonebot_plugin_apscheduler import scheduler
 
 from .config import Config, plugin_config
-from .file_server import register_archive_file_route
 from .message import send_payload_to_group, send_payload_to_private
 from .mirror import MirrorService
 from .schedule import parse_schedule
@@ -28,7 +27,6 @@ __plugin_meta__ = PluginMetadata(
 )
 
 service = MirrorService(plugin_config)
-register_archive_file_route(plugin_config)
 schedule_spec = parse_schedule(
     plugin_config.eratw_schedule,
     plugin_config.eratw_schedule_timezone,

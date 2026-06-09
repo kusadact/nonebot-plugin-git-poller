@@ -41,6 +41,7 @@ class ArchiveInfo:
     size: int
     sha256: str
     password: str
+    download_url: str | None = None
 
     def to_json(self) -> dict[str, Any]:
         return {
@@ -49,6 +50,7 @@ class ArchiveInfo:
             "size": self.size,
             "sha256": self.sha256,
             "password": self.password,
+            "download_url": self.download_url,
         }
 
     @classmethod
@@ -59,6 +61,7 @@ class ArchiveInfo:
             size=int(data["size"]),
             sha256=str(data["sha256"]),
             password=str(data["password"]),
+            download_url=str(data["download_url"]) if data.get("download_url") else None,
         )
 
 
@@ -91,4 +94,3 @@ class UpdatePayload:
             archive=ArchiveInfo.from_json(data["archive"]),
             changelog=str(data.get("changelog") or ""),
         )
-

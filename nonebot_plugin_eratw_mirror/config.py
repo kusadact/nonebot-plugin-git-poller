@@ -22,9 +22,9 @@ class Config(BaseModel):
     eratw_archive_password: str = "eratoho"
     eratw_git_depth: int = 1
     eratw_git_timeout: float = 1800.0
-    eratw_file_base_url: str | None = None
-    eratw_file_route_prefix: str = "/eratw/files"
-    eratw_file_token: str | None = None
+    eratw_worker_base_url: str | None = None
+    eratw_worker_token: str | None = None
+    eratw_worker_timeout: float = 1800.0
     eratw_upload_api_timeout: float | None = 3600.0
 
     eratw_node_user_id: int = 2854196310

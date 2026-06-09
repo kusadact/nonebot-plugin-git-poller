@@ -47,21 +47,10 @@ class StateStore:
         logger.debug(f"eraTW reading payload cache: {self.payload_path}")
         data = json.loads(self.payload_path.read_text(encoding="utf-8"))
         payload = UpdatePayload.from_json(data)
-        if not payload.archive.path.exists():
-            logger.warning(
-                f"eraTW cached payload archive is missing; ignoring cache: {payload.archive.path}"
-            )
-            return None
-        archive_dir = (self.data_dir / "archives").resolve()
-        try:
-            payload.archive.path.resolve().relative_to(archive_dir)
-        except ValueError:
-            logger.warning(
-                "eraTW cached payload archive is outside current data archive dir; "
-                f"ignoring cache: {payload.archive.path}"
-            )
-            return None
-        return payload
+        if payload.archive.download_url:
+            return payload
+        logger.warning("eraTW cached payload has no worker download_url; ignoring cache")
+        return None
 
     def write_last_payload(self, payload: UpdatePayload) -> None:
         logger.info(f"eraTW writing payload cache for {payload.target_short_sha}: {self.payload_path}")

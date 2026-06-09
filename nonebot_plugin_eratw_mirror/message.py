@@ -4,7 +4,6 @@ from nonebot import logger
 from nonebot.adapters.onebot.v11 import Bot, Message, MessageSegment
 
 from .config import Config
-from .file_server import build_archive_download_url
 from .models import UpdatePayload
 
 
@@ -46,18 +45,10 @@ def build_forward_nodes(
 
 
 async def send_payload_to_group(bot: Bot, group_id: int, payload: UpdatePayload, config: Config) -> None:
-    upload_source = build_archive_download_url(payload.archive.path, config)
-    if upload_source:
-        logger.info(
-            f"eraTW archive upload source for group {group_id} uses HTTP route: "
-            f"{upload_source.split('?', 1)[0]}"
-        )
-    else:
-        upload_source = str(payload.archive.path)
-        logger.warning(
-            "eraTW eratw_file_base_url is not configured; falling back to local archive path. "
-            "This only works when the OneBot implementation can read the same filesystem."
-        )
+    upload_source = payload.archive.download_url
+    if not upload_source:
+        raise RuntimeError("Archive payload does not include worker download_url")
+    logger.info(f"eraTW archive upload source for group {group_id} uses worker URL")
     logger.info(
         f"eraTW uploading archive to group {group_id}: "
         f"{payload.archive.name} ({payload.archive.size / 1024 / 1024:.2f} MiB)"
@@ -119,16 +110,15 @@ def _node(content: str, config: Config) -> MessageSegment:
 
 
 def _archive_text(payload: UpdatePayload, *, archive_uploaded: bool) -> str:
-    status = "已上传群文件" if archive_uploaded else "未上传群文件，请查看 Bot 本地文件路径"
+    status = "已上传群文件" if archive_uploaded else "未上传群文件，请查看 worker 下载源"
     size_mb = payload.archive.size / 1024 / 1024
-    return "\n".join(
-        [
-            "加密压缩包",
-            f"状态: {status}",
-            f"文件名: {payload.archive.name}",
-            f"大小: {size_mb:.2f} MiB",
-            f"密码: {payload.archive.password}",
-            f"sha256: {payload.archive.sha256}",
-            f"本地路径: {payload.archive.path}",
-        ]
-    )
+    lines = [
+        "加密压缩包",
+        f"状态: {status}",
+        f"文件名: {payload.archive.name}",
+        f"大小: {size_mb:.2f} MiB",
+        f"密码: {payload.archive.password}",
+        f"sha256: {payload.archive.sha256}",
+    ]
+    lines.append("下载源: 远端 worker")
+    return "\n".join(lines)

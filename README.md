@@ -6,10 +6,10 @@ GitGud eraTW 魔改仓库更新搬运插件。
 
 1. 比较当前 commit 和本地保存的 `last_success_sha`。
 2. 用 GitLab compare API 补齐两次推送间隔内的所有 commit。
-3. 使用 dulwich 在插件 data 目录维护本地 Git 缓存，fetch 最新 commit，并导出到临时工作目录。
-4. 使用 py7zr 本地重新打包为仅存储、带密码、隐藏文件列表的 7z。
+3. 请求远端 worker 维护 Git 缓存、fetch 最新 commit，并导出源码。
+4. worker 使用 py7zr 重新打包为仅存储、带密码、隐藏文件列表的 7z。
 5. 提取 `魔改版更新记录文档/补丁&readme集/ADD_BANQUET_开发日志.md` 在本次更新中的新增内容。
-6. 上传 7z 群文件，并发送合并转发消息。
+6. 将 worker 下载地址交给 OneBot/NapCat 上传群文件，并发送合并转发消息。
 
 ## 配置
 
@@ -41,14 +41,10 @@ eratw_git_timeout=1800
 # 可选：覆盖 Git 拉取地址。默认由 eratw_project_url 自动追加 .git。
 eratw_git_url=""
 
-# 群文件上传使用的临时 HTTP 下载基址。
-# Bot 和 OneBot/NapCat 不在同一个文件系统时必须配置。
-# Docker compose 中 NapCat 与 NoneBot 同网络时常见写法：
-eratw_file_base_url="http://nonebot:8088"
-
-# 临时下载路由和 token。token 为空时插件每次启动自动生成。
-eratw_file_route_prefix="/eratw/files"
-eratw_file_token=""
+# 远端 worker。必须配置。
+eratw_worker_base_url="http://worker.example:18721"
+eratw_worker_token="change-me"
+eratw_worker_timeout=1800
 
 # 上传群文件 API 等待时间，单位秒。大文件建议 1800-7200。
 eratw_upload_api_timeout=3600
@@ -80,19 +76,32 @@ eratw_node_nickname="eraTW 更新"
 
 压缩包会先作为群文件上传。合并转发中的压缩包节点包含文件名、大小、SHA256 和密码。
 
-## 部署注意
+## Worker
 
-Git 拉取由 Python 依赖 `dulwich` 完成，7z 归档由 Python 依赖 `py7zr` 生成，不需要额外安装系统 `git`、`7zz`、`7z` 或 `7za`。
+worker 是独立 Python HTTP 服务，不需要 NoneBot，也不需要系统 `git`、`7zz`、`7z` 或 `7za`。Git 拉取由 `dulwich` 完成，7z 归档由 `py7zr` 生成。
 
-插件会把持久数据放在 NoneBot localstore 的 data 目录下，例如 Docker 环境里的 `/workspace/data/nonebot_plugin_eratw_mirror/`：
+运行示例：
 
-- `git/source.git`: 本地裸 Git 缓存，用于后续增量 fetch。
-- `archives/*.7z`: 已生成的加密 7z 归档。
-- `state.json`、`last_payload.json`: 推送状态和最近一次推送缓存。
+```bash
+python3.11 -m venv /opt/eratw-worker/venv
+/opt/eratw-worker/venv/bin/pip install dulwich==1.2.6 py7zr==1.1.0
 
-临时导出的源码工作目录放在 localstore cache 目录的 `work/<sha>/`，打包完成后可安全清理。
+export ERATW_WORKER_HOST=0.0.0.0
+export ERATW_WORKER_PORT=18721
+export ERATW_WORKER_PUBLIC_BASE_URL="http://worker.example:18721"
+export ERATW_WORKER_TOKEN="change-me"
+export ERATW_WORKER_DATA_DIR=/opt/eratw-worker/data
+export ERATW_WORKER_CACHE_DIR=/opt/eratw-worker/cache
+/opt/eratw-worker/venv/bin/python worker/eratw_worker.py
+```
 
-`upload_group_file` 实际由 OneBot 实现端执行。Bot 与 OneBot/NapCat 分容器部署时，OneBot 端无法读取 Bot 容器内的 `/workspace/...` 路径，需要配置 `eratw_file_base_url`，让 OneBot 通过 HTTP 下载插件生成的 7z。
+worker 持久数据：
+
+- `data/git/*.git`: 本地裸 Git 缓存，用于后续增量 fetch。
+- `data/archives/*/*.7z`: 已生成的加密 7z 归档。
+- `cache/work/*`: 临时导出的源码工作目录，打包完成后可安全清理。
+
+`upload_group_file` 实际由 OneBot/NapCat 执行。worker 返回的 `download_url` 必须能被 NapCat 访问；如果 NapCat 和 worker 在同一台 Docker 主机上，可以让 `ERATW_WORKER_PUBLIC_BASE_URL` 指向 NapCat 容器可访问的主机地址。
 
 大文件上传时，OneBot API 调用会长时间不返回。插件默认把 `upload_group_file` 的等待时间设为 3600 秒；如果你的 NoneBot 或适配器仍然提前超时，也可以在 `.env` 里额外设置 `API_TIMEOUT=3600`。
 
