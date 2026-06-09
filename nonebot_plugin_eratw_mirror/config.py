@@ -22,6 +22,7 @@ class Config(BaseModel):
     eratw_file_base_url: str | None = None
     eratw_file_route_prefix: str = "/eratw/files"
     eratw_file_token: str | None = None
+    eratw_upload_api_timeout: float | None = 3600.0
 
     eratw_node_user_id: int = 2854196310
     eratw_node_nickname: str = "eraTW 更新"

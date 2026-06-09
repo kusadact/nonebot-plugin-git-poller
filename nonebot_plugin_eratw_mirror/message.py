@@ -62,12 +62,18 @@ async def send_payload_to_group(bot: Bot, group_id: int, payload: UpdatePayload,
         f"eraTW uploading archive to group {group_id}: "
         f"{payload.archive.name} ({payload.archive.size / 1024 / 1024:.2f} MiB)"
     )
-    await bot.call_api(
-        "upload_group_file",
-        group_id=int(group_id),
-        file=upload_source,
-        name=payload.archive.name,
-    )
+    api_params: dict[str, object] = {
+        "group_id": int(group_id),
+        "file": upload_source,
+        "name": payload.archive.name,
+    }
+    if config.eratw_upload_api_timeout is not None:
+        api_params["_timeout"] = config.eratw_upload_api_timeout
+        logger.info(
+            f"eraTW upload_group_file API timeout for group {group_id}: "
+            f"{config.eratw_upload_api_timeout} seconds"
+        )
+    await bot.call_api("upload_group_file", **api_params)
     logger.info(f"eraTW archive uploaded to group {group_id}: {payload.archive.name}")
     nodes = build_forward_nodes(payload, config, archive_uploaded=True)
     logger.info(f"eraTW sending forward message to group {group_id}: {len(nodes)} nodes")

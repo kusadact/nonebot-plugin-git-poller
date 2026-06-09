@@ -40,6 +40,9 @@ eratw_file_base_url="http://nonebot:8088"
 eratw_file_route_prefix="/eratw/files"
 eratw_file_token=""
 
+# 上传群文件 API 等待时间，单位秒。大文件建议 1800-7200。
+eratw_upload_api_timeout=3600
+
 # 合并转发节点展示 QQ 和昵称
 eratw_node_user_id=2854196310
 eratw_node_nickname="eraTW 更新"
@@ -72,6 +75,8 @@ eratw_node_nickname="eraTW 更新"
 运行插件的环境需要有 `7zz`、`7z` 或 `7za`。如果 Bot 跑在 Docker 里，需要在镜像中安装 p7zip/7zip，或者把 `eratw_7z_path` 配置为容器内可执行文件路径。
 
 `upload_group_file` 实际由 OneBot 实现端执行。Bot 与 OneBot/NapCat 分容器部署时，OneBot 端无法读取 Bot 容器内的 `/workspace/...` 路径，需要配置 `eratw_file_base_url`，让 OneBot 通过 HTTP 下载插件生成的 7z。
+
+大文件上传时，OneBot API 调用会长时间不返回。插件默认把 `upload_group_file` 的等待时间设为 3600 秒；如果你的 NoneBot 或适配器仍然提前超时，也可以在 `.env` 里额外设置 `API_TIMEOUT=3600`。
 
 ## 开发
 
