@@ -319,7 +319,7 @@ def _safe_name(value: str) -> bool:
 
 
 def _redact_log_value(value: str) -> str:
-    return re.sub(r"([?&]token=)[^\\s&\"]+", r"\\1<redacted>", value)
+    return re.sub(r"([?&]token=)[^\\s&\"]+", r"\1<redacted>", value)
 
 
 def _git_depth(depth: int) -> int | None:
