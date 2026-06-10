@@ -1,8 +1,15 @@
-# nonebot-plugin-eratw-mirror
+<div align="center">
+  <a href="https://v2.nonebot.dev/store">
+    <img src="https://raw.githubusercontent.com/fllesser/nonebot-plugin-template/refs/heads/resource/.docs/NoneBotPlugin.svg" width="310" alt="logo">
+  </a>
+
+## ✨ nonebot-plugin-eratw-mirror ✨
+
+</div>
 
 GitGud eraTW 魔改仓库更新搬运插件。
 
-插件会按定时计划检查 GitGud 项目 `era-games-zh/touhou/eratw-sub-modding` 的指定分支：
+插件会按定时计划检查 GitGud 项目 `era-games-zh/touhou/eratw-sub-modding` 的主仓库：
 
 1. 比较当前 commit 和本地保存的 `last_success_sha`。
 2. 用 GitLab compare API 补齐两次推送间隔内的所有 commit。
@@ -16,7 +23,13 @@ GitGud eraTW 魔改仓库更新搬运插件。
 在 NoneBot 项目目录中安装插件：
 
 ```bash
-uv add git+https://github.com/kusadact/nonebot-plugin-eratw-mirror.git
+uv add git+https://github.com/kusadact/nonebot-plugin-eratw-mirror.git --branch feat/pack-worker
+```
+
+在 worker 服务器拉取 worker 脚本：
+
+```bash
+git clone -b feat/pack-worker https://github.com/kusadact/nonebot-plugin-eratw-mirror.git /opt/eratw-worker/repo
 ```
 
 在 `pyproject.toml` 中加载插件：
@@ -25,8 +38,6 @@ uv add git+https://github.com/kusadact/nonebot-plugin-eratw-mirror.git
 [tool.nonebot]
 plugins = ["nonebot_plugin_eratw_mirror"]
 ```
-
-本插件依赖 OneBot V11 适配器、`nonebot_plugin_apscheduler` 和 `nonebot_plugin_localstore`，通过上面的安装命令会自动安装 Python 依赖；NoneBot 仍需要按你的运行方式连接 OneBot/NapCat。
 
 ## 配置
 
@@ -37,8 +48,8 @@ plugins = ["nonebot_plugin_eratw_mirror"]
 | `eratw_group_ids` | 否 | `[]` | 自动推送群白名单；为空时不会自动推送。 |
 | `eratw_schedule` | 否 | `daily@04:00` | 定时检查规则；留空关闭自动推送。支持 `daily@HH:MM`、`weekly@mon,thu@HH:MM`、`interval_days@2@HH:MM`。 |
 | `eratw_schedule_timezone` | 否 | `Asia/Shanghai` | 定时任务时区。 |
-| `eratw_proxy` | 否 | 空 | Bot 端访问 GitGud API 使用的代理；未配置 `eratw_worker_proxy` 时也会作为 worker Git 拉取代理的默认值。 |
-| `eratw_worker_proxy` | 否 | 未设置 | worker 服务器执行 Git 拉取时使用的代理；worker 和 Bot 不在同一台机器时应填写 worker 可访问的代理地址。显式设为空字符串可让 worker 不走代理。 |
+| `eratw_proxy` | 否 | 空 | Bot 端访问 GitGud API 使用的代理。 |
+| `eratw_worker_proxy` | 否 | 未设置 | worker 服务器执行 Git 拉取时使用的代理。 |
 | `eratw_archive_password` | 否 | `eratoho` | 生成 7z 压缩包时使用的密码。 |
 | `eratw_timeout` | 否 | `3600` | 超时时间，单位秒；用于请求远端 worker 和群文件上传 API 等长耗时操作。 |
 | `API_TIMEOUT` | 建议 | `3600` | NoneBot/适配器全局 API 超时，不是本插件配置项；建议填写并与 `eratw_timeout` 保持一致，不填写时大文件上传容易被默认超时提前中断。 |
@@ -67,27 +78,12 @@ eratw_worker_token="change-me"
 
 仅限 SuperUser。优先重发最近一次已生成的推送；如果没有历史推送，就拉取最新 commit，生成压缩包，并发送测试合并转发消息。测试命令不会更新 `last_success_sha`。
 
-## 消息结构
-
-合并转发消息按如下节点构造：
-
-```text
-消息1: commit 标题 1
-消息2: commit 标题 2
-...
-消息x: 加密压缩包信息
-消息x+1: 本次更新的开发日志
-```
-
-压缩包会先作为群文件上传。合并转发中的压缩包节点包含文件名、大小、SHA256 和密码。
-
 ## Worker
-
-worker 是独立 Python HTTP 服务，不需要 NoneBot，也不需要系统 `git`、`7zz`、`7z` 或 `7za`。Git 拉取由 `dulwich` 完成，7z 归档由 `py7zr` 生成。
 
 运行示例：
 
 ```bash
+cd /opt/eratw-worker/repo
 python3.11 -m venv /opt/eratw-worker/venv
 /opt/eratw-worker/venv/bin/pip install dulwich==1.2.6 py7zr==1.1.0
 
@@ -97,17 +93,10 @@ export ERATW_WORKER_PUBLIC_BASE_URL="http://worker.example:18721"
 export ERATW_WORKER_TOKEN="change-me"
 export ERATW_WORKER_DATA_DIR=/opt/eratw-worker/data
 export ERATW_WORKER_CACHE_DIR=/opt/eratw-worker/cache
+
 /opt/eratw-worker/venv/bin/python worker/eratw_worker.py
 ```
 
-worker 持久数据：
-
-- `data/git/*.git`: 本地裸 Git 缓存，用于后续增量 fetch。
-- `data/archives/*/*.7z`: 已生成的加密 7z 归档。
-- `cache/work/*`: 临时导出的源码工作目录，打包完成后可安全清理。
-
-`upload_group_file` 实际由 OneBot/NapCat 执行。worker 返回的 `download_url` 必须能被 NapCat 访问；如果 NapCat 和 worker 在同一台 Docker 主机上，可以让 `ERATW_WORKER_PUBLIC_BASE_URL` 指向 NapCat 容器可访问的主机地址。
-
-worker 侧 Git 拉取代理由 Bot 端配置的 `eratw_worker_proxy` 随打包请求传入；如果不配置该项，会沿用 `eratw_proxy`。当 Bot 和 worker 分别部署在不同机器或容器网络里时，不要把只在 Bot 机器可用的 `127.0.0.1` 代理地址传给 worker。
+## 部署注意
 
 大文件上传时，OneBot API 调用会长时间不返回。插件默认用 `eratw_timeout=3600` 等待 Git 操作和 `upload_group_file`；同时建议在 `.env` 里填写 `API_TIMEOUT=3600`，否则 NoneBot 或适配器的全局 API 超时可能先断开，导致上传失败。
