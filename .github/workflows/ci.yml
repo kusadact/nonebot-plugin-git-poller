@@ -4,9 +4,11 @@ on:
   push:
     branches:
       - main
+      - feat/pack-worker
     paths:
       - ".github/workflows/**"
       - "src/nonebot_plugin_eratw_mirror/**"
+      - "worker/**"
       - "tests/**"
       - "pyproject.toml"
       - "uv.lock"
@@ -14,6 +16,7 @@ on:
     paths:
       - ".github/workflows/**"
       - "src/nonebot_plugin_eratw_mirror/**"
+      - "worker/**"
       - "tests/**"
       - "pyproject.toml"
       - "uv.lock"
@@ -55,7 +58,7 @@ jobs:
         run: uv run pytest -q
 
       - name: Compile
-        run: uv run python -m compileall -q src/nonebot_plugin_eratw_mirror tests
+        run: uv run python -m compileall -q src/nonebot_plugin_eratw_mirror worker tests
 
       - name: Build package
         run: uv build

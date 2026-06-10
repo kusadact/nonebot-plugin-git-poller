@@ -60,7 +60,7 @@ async def build_remote_archive(
 def _worker_headers(config: Config) -> dict[str, str]:
     token = str(config.eratw_worker_token or "").strip()
     if not token:
-        return {}
+        raise RuntimeError("eratw_worker_token is required in worker mode")
     return {"Authorization": f"Bearer {token}", "X-EraTW-Token": token}
 
 

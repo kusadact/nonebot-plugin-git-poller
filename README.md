@@ -54,7 +54,7 @@ plugins = ["nonebot_plugin_eratw_mirror"]
 | `eratw_timeout` | 否 | `3600` | 超时时间，单位秒；用于请求远端 worker 和群文件上传 API 等长耗时操作。 |
 | `API_TIMEOUT` | 建议 | `3600` | NoneBot/适配器全局 API 超时，不是本插件配置项；建议填写并与 `eratw_timeout` 保持一致，不填写时大文件上传容易被默认超时提前中断。 |
 | `eratw_worker_base_url` | 是 | 空 | 远端 worker 地址，例如 `http://worker.example:18721`。 |
-| `eratw_worker_token` | 建议 | 空 | 远端 worker 鉴权 token；worker 设置了 `ERATW_WORKER_TOKEN` 时必须一致。 |
+| `eratw_worker_token` | 是 | 空 | 远端 worker 鉴权 token；必须和 worker 的 `ERATW_WORKER_TOKEN` 一致。 |
 
 `example.env`:
 

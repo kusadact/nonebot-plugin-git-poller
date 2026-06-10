@@ -12,7 +12,7 @@ require("nonebot_plugin_localstore")
 
 from nonebot_plugin_apscheduler import scheduler
 
-from .config import Config, plugin_config
+from .config import Config, plugin_config, validate_worker_config
 from .message import (
     send_payload_forward_to_group,
     send_payload_to_group,
@@ -30,6 +30,8 @@ __plugin_meta__ = PluginMetadata(
     config=Config,
     supported_adapters={"~onebot.v11"},
 )
+
+validate_worker_config(plugin_config)
 
 service = MirrorService(plugin_config)
 schedule_spec = parse_schedule(

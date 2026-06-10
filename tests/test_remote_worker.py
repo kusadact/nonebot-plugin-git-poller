@@ -47,6 +47,7 @@ def _config(proxy: str | None, worker_proxy: str | None):
     return SimpleNamespace(
         eratw_proxy=proxy,
         eratw_worker_proxy=worker_proxy,
+        eratw_worker_token="secret",
     )
 
 
@@ -84,3 +85,23 @@ def test_empty_worker_proxy_disables_worker_proxy():
         )
         is None
     )
+
+
+def test_worker_headers_require_token():
+    remote_worker = _load_remote_worker_module()
+
+    try:
+        remote_worker._worker_headers(SimpleNamespace(eratw_worker_token=""))
+    except RuntimeError as exc:
+        assert "eratw_worker_token is required" in str(exc)
+    else:
+        raise AssertionError("expected missing worker token to fail")
+
+
+def test_worker_headers_include_token():
+    remote_worker = _load_remote_worker_module()
+
+    assert remote_worker._worker_headers(SimpleNamespace(eratw_worker_token=" secret ")) == {
+        "Authorization": "Bearer secret",
+        "X-EraTW-Token": "secret",
+    }

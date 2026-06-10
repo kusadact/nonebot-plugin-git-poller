@@ -29,4 +29,11 @@ class Config(BaseModel):
     eratw_message_chunk_size: int = 1800
 
 
+def validate_worker_config(config: Config) -> None:
+    if not str(config.eratw_worker_base_url or "").strip():
+        raise RuntimeError("eratw_worker_base_url is required in worker mode")
+    if not str(config.eratw_worker_token or "").strip():
+        raise RuntimeError("eratw_worker_token is required in worker mode")
+
+
 plugin_config = get_plugin_config(Config)
