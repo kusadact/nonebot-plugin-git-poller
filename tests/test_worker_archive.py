@@ -6,6 +6,7 @@ from pathlib import Path
 import sys
 
 from dulwich import porcelain
+import pytest
 
 
 def _load_worker_module():
@@ -63,3 +64,86 @@ def test_archive_response_uses_worker_download_url(tmp_path: Path, monkeypatch):
     assert response["size"] == len(b"content")
     assert response["password"] == "eratoho"
     assert response["download_url"] == "http://worker.example/files/repo123/sample.7z?token=secret"
+
+
+def test_sync_git_repo_retries_transient_fetch_failure(tmp_path: Path, monkeypatch):
+    worker = _load_worker_module()
+    clone_attempts = 0
+    fetch_attempts = 0
+    sleeps: list[float] = []
+
+    monkeypatch.setattr(worker.CONFIG, "git_retries", 5)
+    monkeypatch.setattr(worker.CONFIG, "git_retry_delay", 1.0)
+    monkeypatch.setattr(worker.time, "sleep", sleeps.append)
+    monkeypatch.setattr(worker, "_remove_invalid_git_repo", lambda *args: None)
+
+    def flaky_clone(*args):
+        nonlocal clone_attempts
+        clone_attempts += 1
+        if clone_attempts < 2:
+            raise OSError("connection broken during clone")
+
+    def flaky_fetch(*args):
+        nonlocal fetch_attempts
+        fetch_attempts += 1
+        if fetch_attempts < 3:
+            raise OSError("connection broken during fetch")
+
+    monkeypatch.setattr(worker, "_ensure_git_repo", flaky_clone)
+    monkeypatch.setattr(worker, "_fetch_git_repo", flaky_fetch)
+    monkeypatch.setattr(worker, "_verify_commit", lambda *args: None)
+
+    worker._sync_git_repo(
+        tmp_path / "repo.git",
+        "https://example.test/repo.git",
+        "main",
+        1,
+        "http://proxy.example:7890",
+        "abc123",
+    )
+
+    assert clone_attempts == 2
+    assert fetch_attempts == 3
+    assert sleeps == [1.0, 1.0, 2.0]
+
+
+def test_sync_git_repo_reports_final_retry_failure(tmp_path: Path, monkeypatch):
+    worker = _load_worker_module()
+    attempts = 0
+
+    monkeypatch.setattr(worker.CONFIG, "git_retries", 3)
+    monkeypatch.setattr(worker.CONFIG, "git_retry_delay", 0.0)
+    monkeypatch.setattr(worker.time, "sleep", lambda *_: None)
+    monkeypatch.setattr(worker, "_ensure_git_repo", lambda *args: None)
+    monkeypatch.setattr(worker, "_remove_invalid_git_repo", lambda *args: None)
+
+    def broken_fetch(*args):
+        nonlocal attempts
+        attempts += 1
+        raise OSError("connection broken")
+
+    monkeypatch.setattr(worker, "_fetch_git_repo", broken_fetch)
+    monkeypatch.setattr(worker, "_verify_commit", lambda *args: None)
+
+    with pytest.raises(RuntimeError, match="git fetch main failed after 3 attempts"):
+        worker._sync_git_repo(
+            tmp_path / "repo.git",
+            "https://example.test/repo.git",
+            "main",
+            1,
+            "http://proxy.example:7890",
+            "abc123",
+        )
+
+    assert attempts == 3
+
+
+def test_worker_log_format_preserves_numeric_placeholders():
+    worker = _load_worker_module()
+
+    message = worker._format_log_message(
+        "code %d, message %s: /files/a.7z?token=secret",
+        (404, "File not found"),
+    )
+
+    assert message == "code 404, message File not found: /files/a.7z?token=<redacted>"

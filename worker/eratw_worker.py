@@ -9,6 +9,7 @@ from pathlib import Path
 import shutil
 import stat
 import sys
+import time
 from threading import Lock
 from urllib.parse import parse_qs, quote, unquote, urlparse
 
@@ -20,6 +21,24 @@ import py7zr
 
 BUILD_LOCK = Lock()
 ARCHIVE_CACHE_VERSION = 1
+DEFAULT_GIT_RETRIES = 5
+DEFAULT_GIT_RETRY_DELAY = 3.0
+
+
+def _env_int(name: str, default: int, *, minimum: int) -> int:
+    try:
+        value = int(os.getenv(name, str(default)))
+    except ValueError:
+        return default
+    return max(minimum, value)
+
+
+def _env_float(name: str, default: float, *, minimum: float) -> float:
+    try:
+        value = float(os.getenv(name, str(default)))
+    except ValueError:
+        return default
+    return max(minimum, value)
 
 
 class WorkerConfig:
@@ -30,6 +49,12 @@ class WorkerConfig:
         self.token = os.getenv("ERATW_WORKER_TOKEN", "")
         self.data_dir = Path(os.getenv("ERATW_WORKER_DATA_DIR", "/opt/eratw-worker/data"))
         self.cache_dir = Path(os.getenv("ERATW_WORKER_CACHE_DIR", "/opt/eratw-worker/cache"))
+        self.git_retries = _env_int("ERATW_WORKER_GIT_RETRIES", DEFAULT_GIT_RETRIES, minimum=1)
+        self.git_retry_delay = _env_float(
+            "ERATW_WORKER_GIT_RETRY_DELAY",
+            DEFAULT_GIT_RETRY_DELAY,
+            minimum=0.0,
+        )
 
 
 CONFIG = WorkerConfig()
@@ -69,7 +94,7 @@ class Handler(BaseHTTPRequestHandler):
             self._send_json({"error": str(exc)}, status=500)
 
     def log_message(self, format: str, *args: object) -> None:
-        message = format % tuple(_redact_log_value(str(arg)) for arg in args)
+        message = _format_log_message(format, args)
         sys.stderr.write(
             "%s - - [%s] %s\n"
             % (self.address_string(), self.log_date_time_string(), message)
@@ -158,9 +183,7 @@ def build_archive(payload: dict, base_url: str) -> dict:
         return cached_archive
 
     output_dir.mkdir(parents=True, exist_ok=True)
-    _ensure_git_repo(repo_dir, git_url, branch, git_depth, proxy)
-    _fetch_git_repo(repo_dir, git_url, git_depth, proxy)
-    _verify_commit(repo_dir, sha)
+    _sync_git_repo(repo_dir, git_url, branch, git_depth, proxy, sha)
 
     if work_dir.exists():
         shutil.rmtree(work_dir)
@@ -179,6 +202,45 @@ def build_archive(payload: dict, base_url: str) -> dict:
     response = _archive_response(archive_path, repo_key, password, base_url)
     _write_archive_metadata(metadata_path, sha, git_url, branch, password, response)
     return response
+
+
+def _sync_git_repo(repo_dir: Path, git_url: str, branch: str, depth: int, proxy: str, sha: str) -> None:
+    _run_git_step(
+        f"git clone {git_url}",
+        repo_dir,
+        lambda: _ensure_git_repo(repo_dir, git_url, branch, depth, proxy),
+    )
+    _run_git_step(
+        f"git fetch {branch}",
+        repo_dir,
+        lambda: _fetch_git_repo(repo_dir, git_url, depth, proxy),
+    )
+    _run_git_step(
+        f"git verify {sha[:8]}",
+        repo_dir,
+        lambda: _verify_commit(repo_dir, sha),
+    )
+
+
+def _run_git_step(label: str, repo_dir: Path, operation) -> None:
+    attempts = max(1, CONFIG.git_retries)
+    last_error: Exception | None = None
+    for attempt in range(1, attempts + 1):
+        try:
+            operation()
+            return
+        except Exception as exc:
+            last_error = exc
+            _remove_invalid_git_repo(repo_dir)
+            if attempt >= attempts:
+                break
+            delay = _git_retry_delay(attempt)
+            _log_worker(
+                f"{label} failed on attempt {attempt}/{attempts}: {exc}; "
+                f"retrying in {delay:.1f}s"
+            )
+            time.sleep(delay)
+    raise RuntimeError(f"{label} failed after {attempts} attempts: {last_error}") from last_error
 
 
 def _ensure_git_repo(repo_dir: Path, git_url: str, branch: str, depth: int, proxy: str) -> None:
@@ -386,6 +448,11 @@ def _is_valid_git_repo(repo_dir: Path) -> bool:
     return True
 
 
+def _remove_invalid_git_repo(repo_dir: Path) -> None:
+    if repo_dir.exists() and not _is_valid_git_repo(repo_dir):
+        shutil.rmtree(repo_dir)
+
+
 def _safe_git_path(root: Path, raw_path: bytes) -> Path:
     parts = os.fsdecode(raw_path).split("/")
     if not parts or any(part in {"", ".", ".."} for part in parts):
@@ -411,12 +478,29 @@ def _safe_name(value: str) -> bool:
     return bool(value) and all(char.isalnum() or char in {"-", "_", "."} for char in value)
 
 
+def _format_log_message(format: str, args: tuple[object, ...]) -> str:
+    try:
+        message = format % args
+    except Exception:
+        message = " ".join([format, *(str(arg) for arg in args)])
+    return _redact_log_value(str(message))
+
+
 def _redact_log_value(value: str) -> str:
-    return re.sub(r"([?&]token=)[^\\s&\"]+", r"\1<redacted>", value)
+    return re.sub(r"([?&]token=)[^\s&\"]+", r"\1<redacted>", value)
 
 
 def _git_depth(depth: int) -> int | None:
     return depth if depth > 0 else None
+
+
+def _git_retry_delay(failed_attempt: int) -> float:
+    return CONFIG.git_retry_delay * (2 ** max(0, failed_attempt - 1))
+
+
+def _log_worker(message: str) -> None:
+    sys.stderr.write(f"{_redact_log_value(message)}\n")
+    sys.stderr.flush()
 
 
 def _sha256(path: Path) -> str:
