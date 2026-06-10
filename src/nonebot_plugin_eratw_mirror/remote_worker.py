@@ -25,7 +25,7 @@ async def build_remote_archive(
         "branch": config.eratw_branch,
         "archive_password": config.eratw_archive_password,
         "git_depth": 1,
-        "proxy": config.eratw_proxy,
+        "proxy": _worker_proxy(config),
     }
     headers = _worker_headers(config)
     logger.info(f"eraTW requesting archive worker for {short_sha}: {base_url}")
@@ -66,3 +66,16 @@ def _git_url(config: Config) -> str:
     if value:
         return value
     return f"{config.eratw_project_url.rstrip('/')}.git"
+
+
+def _worker_proxy(config: Config) -> str | None:
+    if config.eratw_worker_proxy is None:
+        return _clean_optional_text(config.eratw_proxy)
+    return _clean_optional_text(config.eratw_worker_proxy)
+
+
+def _clean_optional_text(value: str | None) -> str | None:
+    if value is None:
+        return None
+    value = value.strip()
+    return value or None

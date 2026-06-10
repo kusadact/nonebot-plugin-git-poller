@@ -23,6 +23,7 @@ class Config(BaseModel):
     eratw_timeout: float = 3600.0
     eratw_worker_base_url: str | None = None
     eratw_worker_token: str | None = None
+    eratw_worker_proxy: str | None = None
 
     eratw_command_priority: int = 10
     eratw_message_chunk_size: int = 1800

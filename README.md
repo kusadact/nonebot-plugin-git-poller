@@ -37,7 +37,8 @@ plugins = ["nonebot_plugin_eratw_mirror"]
 | `eratw_group_ids` | 否 | `[]` | 自动推送群白名单；为空时不会自动推送。 |
 | `eratw_schedule` | 否 | `daily@04:00` | 定时检查规则；留空关闭自动推送。支持 `daily@HH:MM`、`weekly@mon,thu@HH:MM`、`interval_days@2@HH:MM`。 |
 | `eratw_schedule_timezone` | 否 | `Asia/Shanghai` | 定时任务时区。 |
-| `eratw_proxy` | 否 | 空 | GitGud API 和 Git 拉取使用的代理，例如 `http://127.0.0.1:7890`。 |
+| `eratw_proxy` | 否 | 空 | Bot 端访问 GitGud API 使用的代理；未配置 `eratw_worker_proxy` 时也会作为 worker Git 拉取代理的默认值。 |
+| `eratw_worker_proxy` | 否 | 未设置 | worker 服务器执行 Git 拉取时使用的代理；worker 和 Bot 不在同一台机器时应填写 worker 可访问的代理地址。显式设为空字符串可让 worker 不走代理。 |
 | `eratw_archive_password` | 否 | `eratoho` | 生成 7z 压缩包时使用的密码。 |
 | `eratw_timeout` | 否 | `3600` | 超时时间，单位秒；用于请求远端 worker 和群文件上传 API 等长耗时操作。 |
 | `API_TIMEOUT` | 建议 | `3600` | NoneBot/适配器全局 API 超时，不是本插件配置项；建议填写并与 `eratw_timeout` 保持一致，不填写时大文件上传容易被默认超时提前中断。 |
@@ -49,7 +50,8 @@ plugins = ["nonebot_plugin_eratw_mirror"]
 ```dotenv
 eratw_group_ids=[123456789, 987654321]
 eratw_schedule="daily@04:00"
-eratw_proxy=""
+eratw_proxy="http://bot-proxy.example:7890"
+eratw_worker_proxy="http://worker-proxy.example:7890"
 eratw_archive_password="eratoho"
 eratw_timeout=3600
 API_TIMEOUT=3600
@@ -105,5 +107,7 @@ worker 持久数据：
 - `cache/work/*`: 临时导出的源码工作目录，打包完成后可安全清理。
 
 `upload_group_file` 实际由 OneBot/NapCat 执行。worker 返回的 `download_url` 必须能被 NapCat 访问；如果 NapCat 和 worker 在同一台 Docker 主机上，可以让 `ERATW_WORKER_PUBLIC_BASE_URL` 指向 NapCat 容器可访问的主机地址。
+
+worker 侧 Git 拉取代理由 Bot 端配置的 `eratw_worker_proxy` 随打包请求传入；如果不配置该项，会沿用 `eratw_proxy`。当 Bot 和 worker 分别部署在不同机器或容器网络里时，不要把只在 Bot 机器可用的 `127.0.0.1` 代理地址传给 worker。
 
 大文件上传时，OneBot API 调用会长时间不返回。插件默认用 `eratw_timeout=3600` 等待 Git 操作和 `upload_group_file`；同时建议在 `.env` 里填写 `API_TIMEOUT=3600`，否则 NoneBot 或适配器的全局 API 超时可能先断开，导致上传失败。
