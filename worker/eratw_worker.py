@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 import hashlib
+import hmac
 import json
 import os
 import re
+from secrets import token_urlsafe
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 import shutil
@@ -11,7 +13,7 @@ import stat
 import sys
 import time
 from threading import Lock
-from urllib.parse import parse_qs, quote, unquote, urlparse
+from urllib.parse import parse_qs, quote, unquote, urlencode, urlparse
 
 from dulwich import porcelain
 from dulwich.object_store import iter_tree_contents
@@ -23,6 +25,7 @@ BUILD_LOCK = Lock()
 ARCHIVE_CACHE_VERSION = 1
 DEFAULT_GIT_RETRIES = 5
 DEFAULT_GIT_RETRY_DELAY = 3.0
+DEFAULT_FILE_TOKEN_TTL = 3600
 
 
 def _env_int(name: str, default: int, *, minimum: int) -> int:
@@ -41,6 +44,22 @@ def _env_float(name: str, default: float, *, minimum: float) -> float:
     return max(minimum, value)
 
 
+def _load_file_token(data_dir: Path) -> str:
+    token_path = data_dir / "file_download_token"
+    try:
+        if token_path.exists():
+            token = token_path.read_text(encoding="utf-8").strip()
+            if token:
+                return token
+        data_dir.mkdir(parents=True, exist_ok=True)
+        token = token_urlsafe(32)
+        token_path.write_text(token, encoding="utf-8")
+        token_path.chmod(0o600)
+        return token
+    except OSError:
+        return token_urlsafe(32)
+
+
 class WorkerConfig:
     def __init__(self) -> None:
         self.host = os.getenv("ERATW_WORKER_HOST", "0.0.0.0")
@@ -49,6 +68,12 @@ class WorkerConfig:
         self.token = os.getenv("ERATW_WORKER_TOKEN", "")
         self.data_dir = Path(os.getenv("ERATW_WORKER_DATA_DIR", "/opt/eratw-worker/data"))
         self.cache_dir = Path(os.getenv("ERATW_WORKER_CACHE_DIR", "/opt/eratw-worker/cache"))
+        self.file_token = os.getenv("ERATW_WORKER_FILE_TOKEN", "").strip()
+        self.file_token_ttl = _env_int(
+            "ERATW_WORKER_FILE_TOKEN_TTL",
+            DEFAULT_FILE_TOKEN_TTL,
+            minimum=60,
+        )
         self.git_retries = _env_int("ERATW_WORKER_GIT_RETRIES", DEFAULT_GIT_RETRIES, minimum=1)
         self.git_retry_delay = _env_float(
             "ERATW_WORKER_GIT_RETRY_DELAY",
@@ -101,9 +126,6 @@ class Handler(BaseHTTPRequestHandler):
         )
 
     def _serve_file(self, raw_path: str, query: dict[str, list[str]]) -> None:
-        if CONFIG.token and (query.get("token") or [""])[0] != CONFIG.token:
-            self.send_error(403)
-            return
         parts = [unquote(part) for part in raw_path.split("/") if part]
         if len(parts) != 2:
             self.send_error(404)
@@ -111,6 +133,9 @@ class Handler(BaseHTTPRequestHandler):
         repo_key, filename = parts
         if not _safe_name(repo_key) or not _safe_name(filename) or not filename.endswith(".7z"):
             self.send_error(404)
+            return
+        if not _valid_download_token(repo_key, filename, query):
+            self.send_error(403)
             return
         archive_dir = (CONFIG.data_dir / "archives" / repo_key).resolve()
         archive_path = (archive_dir / filename).resolve()
@@ -328,14 +353,16 @@ def _write_7z(source: Path, output: Path, password: str) -> None:
 
 
 def _archive_response(path: Path, repo_key: str, password: str, base_url: str) -> dict:
-    token_query = f"?token={quote(CONFIG.token)}" if CONFIG.token else ""
+    download_expires_at = int(time.time()) + CONFIG.file_token_ttl
+    query = _download_url_query(repo_key, path.name, download_expires_at)
     return {
         "name": path.name,
         "size": path.stat().st_size,
         "sha256": _sha256(path),
         "password": password,
         "path": str(path),
-        "download_url": f"{base_url}/files/{quote(repo_key)}/{quote(path.name)}{token_query}",
+        "download_url": f"{base_url}/files/{quote(repo_key)}/{quote(path.name)}?{query}",
+        "download_expires_at": download_expires_at,
     }
 
 
@@ -476,6 +503,36 @@ def _clean_short_sha(value: str) -> str:
 
 def _safe_name(value: str) -> bool:
     return bool(value) and all(char.isalnum() or char in {"-", "_", "."} for char in value)
+
+
+def _download_url_query(repo_key: str, filename: str, expires_at: int) -> str:
+    token = _download_token(repo_key, filename, expires_at)
+    return urlencode({"expires": str(expires_at), "token": token})
+
+
+def _valid_download_token(repo_key: str, filename: str, query: dict[str, list[str]]) -> bool:
+    token = (query.get("token") or [""])[0]
+    expires_text = (query.get("expires") or [""])[0]
+    try:
+        expires_at = int(expires_text)
+    except ValueError:
+        return False
+    if expires_at < int(time.time()):
+        return False
+    expected = _download_token(repo_key, filename, expires_at)
+    return hmac.compare_digest(token, expected)
+
+
+def _download_token(repo_key: str, filename: str, expires_at: int) -> str:
+    message = f"{repo_key}\0{filename}\0{expires_at}".encode("utf-8")
+    secret = _download_secret().encode("utf-8")
+    return hmac.new(secret, message, hashlib.sha256).hexdigest()
+
+
+def _download_secret() -> str:
+    if not CONFIG.file_token:
+        CONFIG.file_token = _load_file_token(CONFIG.data_dir)
+    return CONFIG.file_token
 
 
 def _format_log_message(format: str, args: tuple[object, ...]) -> str:

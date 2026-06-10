@@ -46,6 +46,9 @@ async def build_remote_archive(
         sha256=str(data["sha256"]),
         password=str(data.get("password") or config.eratw_archive_password),
         download_url=str(data["download_url"]),
+        download_expires_at=int(data["download_expires_at"])
+        if data.get("download_expires_at")
+        else None,
     )
     logger.info(
         f"eraTW worker archive ready {archive.name}: "

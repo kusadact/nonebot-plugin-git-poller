@@ -42,6 +42,7 @@ class ArchiveInfo:
     sha256: str
     password: str
     download_url: str | None = None
+    download_expires_at: int | None = None
 
     def to_json(self) -> dict[str, Any]:
         return {
@@ -51,6 +52,7 @@ class ArchiveInfo:
             "sha256": self.sha256,
             "password": self.password,
             "download_url": self.download_url,
+            "download_expires_at": self.download_expires_at,
         }
 
     @classmethod
@@ -62,6 +64,9 @@ class ArchiveInfo:
             sha256=str(data["sha256"]),
             password=str(data["password"]),
             download_url=str(data["download_url"]) if data.get("download_url") else None,
+            download_expires_at=int(data["download_expires_at"])
+            if data.get("download_expires_at")
+            else None,
         )
 
 

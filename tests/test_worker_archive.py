@@ -4,6 +4,7 @@ import importlib.util
 import os
 from pathlib import Path
 import sys
+from urllib.parse import parse_qs, urlparse
 
 from dulwich import porcelain
 import pytest
@@ -52,6 +53,8 @@ def test_archive_response_uses_worker_download_url(tmp_path: Path, monkeypatch):
     archive = tmp_path / "sample.7z"
     archive.write_bytes(b"content")
     monkeypatch.setattr(worker.CONFIG, "token", "secret")
+    monkeypatch.setattr(worker.CONFIG, "file_token", "file-secret")
+    monkeypatch.setattr(worker.CONFIG, "file_token_ttl", 3600)
 
     response = worker._archive_response(
         archive,
@@ -63,7 +66,25 @@ def test_archive_response_uses_worker_download_url(tmp_path: Path, monkeypatch):
     assert response["name"] == "sample.7z"
     assert response["size"] == len(b"content")
     assert response["password"] == "eratoho"
-    assert response["download_url"] == "http://worker.example/files/repo123/sample.7z?token=secret"
+    parsed = urlparse(response["download_url"])
+    query = parse_qs(parsed.query)
+    assert parsed.scheme == "http"
+    assert parsed.netloc == "worker.example"
+    assert parsed.path == "/files/repo123/sample.7z"
+    assert query["token"] != ["secret"]
+    assert query["expires"] == [str(response["download_expires_at"])]
+    assert worker._valid_download_token("repo123", "sample.7z", query)
+
+
+def test_default_file_token_is_persisted(tmp_path: Path):
+    worker = _load_worker_module()
+
+    first = worker._load_file_token(tmp_path)
+    second = worker._load_file_token(tmp_path)
+
+    assert first == second
+    assert first
+    assert (tmp_path / "file_download_token").read_text(encoding="utf-8") == first
 
 
 def test_sync_git_repo_retries_transient_fetch_failure(tmp_path: Path, monkeypatch):

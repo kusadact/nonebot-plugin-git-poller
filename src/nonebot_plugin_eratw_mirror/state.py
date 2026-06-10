@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+import time
 from typing import Any
 
 from nonebot import logger
@@ -31,6 +32,7 @@ class StateStore:
         state = self.read_state()
         state["last_success_sha"] = sha
         state["last_push_time"] = pushed_at
+        state.pop("group_upload_success", None)
         state.pop("group_push_success", None)
         logger.info(f"eraTW state last_success_sha updated to {sha[:8]}")
         self.write_state(state)
@@ -49,6 +51,13 @@ class StateStore:
         data = json.loads(self.payload_path.read_text(encoding="utf-8"))
         payload = UpdatePayload.from_json(data)
         if payload.archive.download_url:
+            expires_at = payload.archive.download_expires_at
+            if expires_at is None:
+                logger.warning("eraTW cached payload worker download_url has no expiry; ignoring cache")
+                return None
+            if expires_at <= int(time.time()) + 60:
+                logger.warning("eraTW cached payload worker download_url is expired; ignoring cache")
+                return None
             return payload
         logger.warning("eraTW cached payload has no worker download_url; ignoring cache")
         return None
@@ -58,7 +67,21 @@ class StateStore:
         self._write_json(self.payload_path, payload.to_json())
 
     def read_successful_groups(self, sha: str) -> set[int]:
-        data = self.read_state().get("group_push_success")
+        return self._read_group_state("group_push_success", sha)
+
+    def read_uploaded_groups(self, sha: str) -> set[int]:
+        return self._read_group_state("group_upload_success", sha)
+
+    def add_successful_group(self, sha: str, group_id: int) -> None:
+        self._add_group_state("group_push_success", sha, group_id)
+        logger.info(f"eraTW recorded successful group push for {sha[:8]}: {group_id}")
+
+    def add_uploaded_group(self, sha: str, group_id: int) -> None:
+        self._add_group_state("group_upload_success", sha, group_id)
+        logger.info(f"eraTW recorded successful group archive upload for {sha[:8]}: {group_id}")
+
+    def _read_group_state(self, key: str, sha: str) -> set[int]:
+        data = self.read_state().get(key)
         if not isinstance(data, dict) or data.get("sha") != sha:
             return set()
         groups = data.get("groups")
@@ -72,9 +95,9 @@ class StateStore:
                 continue
         return result
 
-    def add_successful_group(self, sha: str, group_id: int) -> None:
+    def _add_group_state(self, key: str, sha: str, group_id: int) -> None:
         state = self.read_state()
-        data = state.get("group_push_success")
+        data = state.get(key)
         if not isinstance(data, dict) or data.get("sha") != sha:
             data = {"sha": sha, "groups": []}
         groups = data.get("groups")
@@ -84,8 +107,7 @@ class StateStore:
         if group_text not in {str(item) for item in groups}:
             groups.append(group_text)
         data["groups"] = groups
-        state["group_push_success"] = data
-        logger.info(f"eraTW recorded successful group push for {sha[:8]}: {group_id}")
+        state[key] = data
         self.write_state(state)
 
     @staticmethod
