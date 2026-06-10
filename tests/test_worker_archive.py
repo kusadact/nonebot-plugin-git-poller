@@ -87,6 +87,21 @@ def test_default_file_token_is_persisted(tmp_path: Path):
     assert (tmp_path / "file_download_token").read_text(encoding="utf-8") == first
 
 
+def test_worker_build_requires_token(monkeypatch):
+    worker = _load_worker_module()
+    monkeypatch.setattr(worker.CONFIG, "token", "")
+
+    assert worker.Handler._authorized(object()) is False
+
+
+def test_worker_main_requires_token(monkeypatch):
+    worker = _load_worker_module()
+    monkeypatch.setattr(worker.CONFIG, "token", "")
+
+    with pytest.raises(RuntimeError, match="ERATW_WORKER_TOKEN is required"):
+        worker.main()
+
+
 def test_sync_git_repo_retries_transient_fetch_failure(tmp_path: Path, monkeypatch):
     worker = _load_worker_module()
     clone_attempts = 0

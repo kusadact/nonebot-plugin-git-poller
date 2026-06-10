@@ -7,6 +7,7 @@ from nonebot.adapters.onebot.v11 import Bot, Message, MessageSegment
 
 from .config import Config
 from .models import UpdatePayload
+from .remote_worker import build_remote_archive
 
 DEFAULT_NODE_USER_ID = 2854196310
 
@@ -54,18 +55,23 @@ async def upload_payload_archive_to_group(
     payload: UpdatePayload,
     config: Config,
 ) -> None:
-    upload_source = payload.archive.download_url
+    refreshed_archive = await build_remote_archive(
+        payload.target_sha,
+        payload.target_short_sha,
+        config,
+    )
+    upload_source = refreshed_archive.download_url
     if not upload_source:
         raise RuntimeError("Archive payload does not include worker download_url")
     logger.info(f"eraTW archive upload source for group {group_id} uses worker URL")
     logger.info(
         f"eraTW uploading archive to group {group_id}: "
-        f"{payload.archive.name} ({payload.archive.size / 1024 / 1024:.2f} MiB)"
+        f"{refreshed_archive.name} ({refreshed_archive.size / 1024 / 1024:.2f} MiB)"
     )
     api_params: dict[str, object] = {
         "group_id": int(group_id),
         "file": upload_source,
-        "name": payload.archive.name,
+        "name": refreshed_archive.name,
         "_timeout": config.eratw_timeout,
     }
     logger.info(
@@ -73,7 +79,7 @@ async def upload_payload_archive_to_group(
         f"{config.eratw_timeout} seconds"
     )
     await bot.call_api("upload_group_file", **api_params)
-    logger.info(f"eraTW archive uploaded to group {group_id}: {payload.archive.name}")
+    logger.info(f"eraTW archive uploaded to group {group_id}: {refreshed_archive.name}")
 
 
 async def send_payload_forward_to_group(

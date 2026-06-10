@@ -157,7 +157,7 @@ class Handler(BaseHTTPRequestHandler):
 
     def _authorized(self) -> bool:
         if not CONFIG.token:
-            return True
+            return False
         auth = self.headers.get("Authorization", "")
         token = self.headers.get("X-EraTW-Token", "")
         return auth == f"Bearer {CONFIG.token}" or token == CONFIG.token
@@ -581,6 +581,8 @@ class _NullBinaryWriter:
 
 
 def main() -> None:
+    if not CONFIG.token:
+        raise RuntimeError("ERATW_WORKER_TOKEN is required")
     CONFIG.data_dir.mkdir(parents=True, exist_ok=True)
     CONFIG.cache_dir.mkdir(parents=True, exist_ok=True)
     server = ThreadingHTTPServer((CONFIG.host, CONFIG.port), Handler)
