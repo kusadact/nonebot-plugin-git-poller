@@ -105,11 +105,17 @@ async def run_scheduled_check() -> None:
         failed_groups: list[int] = []
         for group_id in pending_groups:
             logger.info(f"eraTW scheduled push started for group {group_id}")
+            archive = None
             try:
                 archive_uploaded = group_id in uploaded_groups
                 if not archive_uploaded:
-                    await upload_payload_archive_to_group(bot, group_id, payload, plugin_config)
-                    service.mark_group_uploaded(payload, group_id)
+                    archive = await upload_payload_archive_to_group(
+                        bot,
+                        group_id,
+                        payload,
+                        plugin_config,
+                    )
+                    service.mark_group_uploaded(payload, group_id, archive=archive)
                     archive_uploaded = True
                 else:
                     logger.info(
@@ -122,6 +128,7 @@ async def run_scheduled_check() -> None:
                     payload,
                     plugin_config,
                     archive_uploaded=archive_uploaded,
+                    archive=archive,
                 )
             except Exception:
                 failed_groups.append(group_id)

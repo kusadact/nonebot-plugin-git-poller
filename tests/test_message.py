@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import asyncio
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 import importlib.util
 from pathlib import Path
 import sys
@@ -32,6 +32,7 @@ def _load_message_module(refreshed_archive: object):
     config_module = types.ModuleType("nonebot_plugin_eratw_mirror.config")
     config_module.Config = object
     models_module = types.ModuleType("nonebot_plugin_eratw_mirror.models")
+    models_module.ArchiveInfo = object
     models_module.UpdatePayload = object
     remote_worker_module = types.ModuleType("nonebot_plugin_eratw_mirror.remote_worker")
 
@@ -67,7 +68,9 @@ def _load_message_module(refreshed_archive: object):
 class _Archive:
     name: str
     size: int
-    download_url: str
+    download_url: str | None
+    sha256: str = "sha"
+    password: str = "pass"
 
 
 @dataclass
@@ -75,6 +78,8 @@ class _Payload:
     target_sha: str
     target_short_sha: str
     archive: _Archive
+    commits: list[object] = field(default_factory=list)
+    changelog: str = ""
 
 
 class _Bot:
@@ -83,6 +88,18 @@ class _Bot:
 
     async def call_api(self, api_name: str, **kwargs: object) -> None:
         self.calls.append((api_name, kwargs))
+
+    async def send_group_forward_msg(self, **kwargs: object) -> None:
+        self.calls.append(("send_group_forward_msg", kwargs))
+
+
+def _config() -> SimpleNamespace:
+    return SimpleNamespace(
+        eratw_timeout=3600,
+        eratw_message_chunk_size=2048,
+        eratw_git_url=None,
+        eratw_project_url="https://gitgud.io/era-games-zh/touhou/eratw-sub-modding",
+    )
 
 
 def test_group_archive_upload_refreshes_worker_download_url():
@@ -102,10 +119,11 @@ def test_group_archive_upload_refreshes_worker_download_url():
             download_url="http://worker.example/files/repo/stale.7z?expires=1&token=stale",
         ),
     )
-    config = SimpleNamespace(eratw_timeout=3600)
+    config = _config()
 
-    asyncio.run(message.upload_payload_archive_to_group(bot, 10001, payload, config))
+    archive = asyncio.run(message.upload_payload_archive_to_group(bot, 10001, payload, config))
 
+    assert archive is refreshed
     assert bot.calls == [
         (
             "upload_group_file",
@@ -117,3 +135,38 @@ def test_group_archive_upload_refreshes_worker_download_url():
             },
         )
     ]
+
+
+def test_send_payload_uses_refreshed_archive_metadata_in_forward_message():
+    refreshed = _Archive(
+        name="fresh.7z",
+        size=1024,
+        download_url="http://worker.example/files/repo/fresh.7z?expires=2&token=fresh",
+        sha256="fresh-sha",
+        password="fresh-pass",
+    )
+    message = _load_message_module(refreshed)
+    bot = _Bot()
+    payload = _Payload(
+        target_sha="abc123",
+        target_short_sha="abc123",
+        archive=_Archive(
+            name="stale.7z",
+            size=1024,
+            download_url="http://worker.example/files/repo/stale.7z?expires=1&token=stale",
+            sha256="stale-sha",
+            password="stale-pass",
+        ),
+    )
+
+    asyncio.run(message.send_payload_to_group(bot, 10001, payload, _config()))
+
+    assert bot.calls[0][0] == "upload_group_file"
+    assert bot.calls[1][0] == "send_group_forward_msg"
+    archive_node = bot.calls[1][1]["messages"][0]
+    archive_text = archive_node[1]["content"]
+    assert "fresh.7z" in archive_text
+    assert "fresh-pass" in archive_text
+    assert "fresh-sha" in archive_text
+    assert "stale-pass" not in archive_text
+    assert "stale-sha" not in archive_text

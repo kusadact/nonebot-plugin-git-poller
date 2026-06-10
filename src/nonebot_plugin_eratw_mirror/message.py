@@ -6,7 +6,7 @@ from nonebot import logger
 from nonebot.adapters.onebot.v11 import Bot, Message, MessageSegment
 
 from .config import Config
-from .models import UpdatePayload
+from .models import ArchiveInfo, UpdatePayload
 from .remote_worker import build_remote_archive
 
 DEFAULT_NODE_USER_ID = 2854196310
@@ -17,7 +17,9 @@ def build_forward_nodes(
     config: Config,
     *,
     archive_uploaded: bool,
+    archive: ArchiveInfo | None = None,
 ) -> list[MessageSegment]:
+    archive_info = archive or payload.archive
     nodes: list[MessageSegment] = []
     logger.debug(
         f"eraTW building forward nodes for {payload.target_short_sha}: "
@@ -36,7 +38,7 @@ def build_forward_nodes(
         )
         nodes.append(_node(content, config))
 
-    nodes.append(_node(_archive_text(payload, archive_uploaded=archive_uploaded), config))
+    nodes.append(_node(_archive_text(archive_info, archive_uploaded=archive_uploaded), config))
 
     changelog = payload.changelog.strip() or "本次提交未更新 ADD_BANQUET_开发日志.md"
     chunks = split_text(changelog, config.eratw_message_chunk_size)
@@ -54,7 +56,7 @@ async def upload_payload_archive_to_group(
     group_id: int,
     payload: UpdatePayload,
     config: Config,
-) -> None:
+) -> ArchiveInfo:
     refreshed_archive = await build_remote_archive(
         payload.target_sha,
         payload.target_short_sha,
@@ -80,6 +82,7 @@ async def upload_payload_archive_to_group(
     )
     await bot.call_api("upload_group_file", **api_params)
     logger.info(f"eraTW archive uploaded to group {group_id}: {refreshed_archive.name}")
+    return refreshed_archive
 
 
 async def send_payload_forward_to_group(
@@ -89,21 +92,28 @@ async def send_payload_forward_to_group(
     config: Config,
     *,
     archive_uploaded: bool,
+    archive: ArchiveInfo | None = None,
 ) -> None:
-    nodes = build_forward_nodes(payload, config, archive_uploaded=archive_uploaded)
+    nodes = build_forward_nodes(
+        payload,
+        config,
+        archive_uploaded=archive_uploaded,
+        archive=archive,
+    )
     logger.info(f"eraTW sending forward message to group {group_id}: {len(nodes)} nodes")
     await bot.send_group_forward_msg(group_id=int(group_id), messages=nodes)
     logger.info(f"eraTW forward message sent to group {group_id}")
 
 
 async def send_payload_to_group(bot: Bot, group_id: int, payload: UpdatePayload, config: Config) -> None:
-    await upload_payload_archive_to_group(bot, group_id, payload, config)
+    archive = await upload_payload_archive_to_group(bot, group_id, payload, config)
     await send_payload_forward_to_group(
         bot,
         group_id,
         payload,
         config,
         archive_uploaded=True,
+        archive=archive,
     )
 
 
@@ -157,16 +167,16 @@ def _repository_name(config: Config) -> str:
     return name or "Git 更新"
 
 
-def _archive_text(payload: UpdatePayload, *, archive_uploaded: bool) -> str:
+def _archive_text(archive: ArchiveInfo, *, archive_uploaded: bool) -> str:
     status = "已上传群文件" if archive_uploaded else "未上传群文件"
-    size_mb = payload.archive.size / 1024 / 1024
+    size_mb = archive.size / 1024 / 1024
     return "\n".join(
         [
             "加密压缩包",
             f"状态: {status}",
-            f"文件名: {payload.archive.name}",
+            f"文件名: {archive.name}",
             f"大小: {size_mb:.2f} MiB",
-            f"密码: {payload.archive.password}",
-            f"sha256: {payload.archive.sha256}",
+            f"密码: {archive.password}",
+            f"sha256: {archive.sha256}",
         ]
     )

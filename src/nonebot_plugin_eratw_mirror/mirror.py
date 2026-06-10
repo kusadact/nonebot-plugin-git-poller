@@ -9,7 +9,7 @@ from .archive import build_encrypted_archive
 from .changelog import extract_changelog_from_diffs
 from .config import Config
 from .gitgud import GitGudClient
-from .models import UpdatePayload
+from .models import ArchiveInfo, UpdatePayload
 from .state import StateStore
 
 
@@ -91,13 +91,20 @@ class MirrorService:
         return self.state.read_successful_groups(payload.target_sha)
 
     def uploaded_groups(self, payload: UpdatePayload) -> set[int]:
-        return self.state.read_uploaded_groups(payload.target_sha)
+        return self.state.read_uploaded_groups(payload.target_sha, payload.archive.sha256)
 
     def mark_group_success(self, payload: UpdatePayload, group_id: int) -> None:
         self.state.add_successful_group(payload.target_sha, group_id)
 
-    def mark_group_uploaded(self, payload: UpdatePayload, group_id: int) -> None:
-        self.state.add_uploaded_group(payload.target_sha, group_id)
+    def mark_group_uploaded(
+        self,
+        payload: UpdatePayload,
+        group_id: int,
+        *,
+        archive: ArchiveInfo | None = None,
+    ) -> None:
+        archive_info = archive or payload.archive
+        self.state.add_uploaded_group(payload.target_sha, archive_info.sha256, group_id)
 
     async def _build_single_commit_payload(self, client: GitGudClient, sha: str) -> UpdatePayload:
         logger.info(f"eraTW preparing single commit payload: {sha[:8]}")
