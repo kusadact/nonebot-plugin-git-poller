@@ -126,15 +126,15 @@ def _repository_name(config: Config) -> str:
 
 
 def _archive_text(payload: UpdatePayload, *, archive_uploaded: bool) -> str:
-    status = "已上传群文件" if archive_uploaded else "未上传群文件，请查看 worker 下载源"
+    status = "已上传群文件" if archive_uploaded else "未上传群文件"
     size_mb = payload.archive.size / 1024 / 1024
-    lines = [
-        "加密压缩包",
-        f"状态: {status}",
-        f"文件名: {payload.archive.name}",
-        f"大小: {size_mb:.2f} MiB",
-        f"密码: {payload.archive.password}",
-        f"sha256: {payload.archive.sha256}",
-    ]
-    lines.append("下载源: 远端 worker")
-    return "\n".join(lines)
+    return "\n".join(
+        [
+            "加密压缩包",
+            f"状态: {status}",
+            f"文件名: {payload.archive.name}",
+            f"大小: {size_mb:.2f} MiB",
+            f"密码: {payload.archive.password}",
+            f"sha256: {payload.archive.sha256}",
+        ]
+    )
