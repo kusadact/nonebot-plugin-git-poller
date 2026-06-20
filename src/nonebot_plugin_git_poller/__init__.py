@@ -28,7 +28,7 @@ from .mirror import GitPollerService
 from .schedule import parse_schedule
 
 __plugin_meta__ = PluginMetadata(
-    name="Git Poller",
+    name="Git 仓库订阅拉取",
     description="按群订阅 Git 仓库更新，支持多仓库、多分支定时拉取",
     usage=(
         "/关注仓库 仓库url [--分支名]\n"
