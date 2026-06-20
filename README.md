@@ -15,6 +15,8 @@
 
 按群订阅 Git 仓库更新的 NoneBot2 插件，支持多仓库、多分支定时拉取，自动推送 commit 更新摘要并上传源码压缩包。
 
+支持 GitHub、GitLab、Gitee 以及自建 Git 服务等主流 Git 托管平台，兼容标准 HTTP/HTTPS Git 远端。
+
 ## 安装
 
 <details open>
