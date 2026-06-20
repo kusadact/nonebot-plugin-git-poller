@@ -39,6 +39,7 @@ __plugin_meta__ = PluginMetadata(
         "/仓库摘要 仓库url [--分支名]"
     ),
     type="application",
+    homepage="https://github.com/kusadact/nonebot-plugin-git-poller",
     config=Config,
     supported_adapters={"~onebot.v11"},
 )

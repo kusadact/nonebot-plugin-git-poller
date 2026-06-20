@@ -17,18 +17,55 @@
 
 ## 安装
 
-在 NoneBot 项目目录中安装插件：
+<details open>
+<summary>使用 nb-cli 安装</summary>
+
+```bash
+nb plugin install nonebot-plugin-git-poller
+```
+
+</details>
+
+<details>
+<summary>使用包管理器安装</summary>
+
+在 NoneBot 项目目录中，根据你使用的包管理器，输入相应的安装命令：
+
+<details open>
+<summary>uv</summary>
 
 ```bash
 uv add nonebot-plugin-git-poller
 ```
 
-在 `pyproject.toml` 中加载插件：
+</details>
+
+<details>
+<summary>pdm</summary>
+
+```bash
+pdm add nonebot-plugin-git-poller
+```
+
+</details>
+
+<details>
+<summary>poetry</summary>
+
+```bash
+poetry add nonebot-plugin-git-poller
+```
+
+</details>
+
+打开 NoneBot 项目根目录下的 `pyproject.toml` 文件，在 `[tool.nonebot]` 部分追加写入：
 
 ```toml
 [tool.nonebot]
 plugins = ["nonebot_plugin_git_poller"]
 ```
+
+</details>
 
 ## 配置
 
