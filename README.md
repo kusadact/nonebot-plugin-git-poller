@@ -37,7 +37,6 @@ plugins = ["nonebot_plugin_git_poller"]
 | `git_poller_default_schedule` | `每日04-00` | 新关注仓库的默认定时规则；留空可关闭默认定时注册。 |
 | `git_poller_timezone` | `Asia/Shanghai` | 定时任务时区。 |
 | `git_poller_default_branch` | `main` | 新关注仓库的默认分支。 |
-| `git_poller_push_on_first_follow` | `false` | 首次关注时是否推送当前 head。为 `false` 时只记录当前 commit，后续有更新才推送。 |
 | `git_poller_proxy` | 空 | HTTP/HTTPS Git 拉取代理。 |
 | `git_poller_timeout` | `60.0` | HTTP/HTTPS Git 拉取超时，单位秒。 |
 | `git_poller_command_priority` | `10` | 命令优先级。 |
@@ -49,7 +48,6 @@ plugins = ["nonebot_plugin_git_poller"]
 git_poller_default_schedule="每日04-00"
 git_poller_timezone="Asia/Shanghai"
 git_poller_default_branch="main"
-git_poller_push_on_first_follow=false
 git_poller_proxy="http://127.0.0.1:7890"
 git_poller_timeout=60
 git_poller_command_priority=10
@@ -59,22 +57,27 @@ git_poller_max_commits=20
 ## 指令
 
 ```text
-/关注仓库 仓库url
-/取关仓库 仓库url
-/设置仓库 仓库url
+/关注仓库 仓库url [--分支名]
+/取关仓库 仓库url [--分支名]
+/设置仓库 仓库url [--分支名]
 /仓库列表
-/拉取仓库 仓库url
+/拉取仓库 仓库url [--分支名]
+/仓库摘要 仓库url [--分支名]
 ```
 
-`/关注仓库 仓库url` 在当前群关注仓库。插件会按 URL 规范化生成稳定 `repo_key`，同一个群重复关注同一仓库不会新增第二条订阅。
+带 URL 的命令都支持可选分支后缀，例如 `/关注仓库 https://example.test/repo.git --dev`。不写分支时使用 `git_poller_default_branch`。
 
-`/取关仓库 仓库url` 只移除当前群的对应仓库订阅，不影响其他群。
+`/关注仓库 仓库url [--分支名]` 在当前群关注仓库。插件只探测远端 HEAD 并记录为 `last_success_sha`，不会推送摘要。同一个群可以关注同一仓库的不同分支。
 
-`/设置仓库 仓库url` 第一阶段只回复后续格式示例，不会修改状态。
+`/取关仓库 仓库url [--分支名]` 只移除当前群的对应仓库分支订阅，不影响其他群，也不会删除本地缓存文件。
+
+`/设置仓库 仓库url [--分支名]` 第一阶段只回复后续格式示例，不会修改状态。
 
 `/仓库列表` 显示当前群关注的仓库、分支、定时、启用状态和 `last_success_sha`。
 
-`/拉取仓库 仓库url` 立即拉取当前群已关注的仓库并推送摘要；发送成功后才更新本群本仓库的 `last_success_sha`。
+`/拉取仓库 仓库url [--分支名]` 立即拉取当前群已关注的仓库，并把 `last_success_sha` 更新到远端最新 HEAD。
+
+`/仓库摘要 仓库url [--分支名]` 拉取远端并展示本群记录与远端 HEAD 的差异；本地与远程相同时只回复相同，不更新 `last_success_sha`。
 
 ## 定时格式
 
@@ -99,7 +102,7 @@ git_poller_max_commits=20
   "groups": {
     "123456789": {
       "repos": {
-        "repo-xxxxxxxxxxxx": {
+        "repo-main-xxxxxxxxxxxx": {
           "url": "https://github.com/example/repo.git",
           "branch": "main",
           "schedule": "每日04-00",

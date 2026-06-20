@@ -120,6 +120,17 @@ class FetchedRepository:
 
         return [self.head_commit()]
 
+    def count_commits_since(self, previous_sha: str | None) -> int | None:
+        if not previous_sha:
+            return None
+        if not _has_object(self.repo, previous_sha):
+            return None
+        walker = self.repo.get_walker(
+            include=[self.head_sha.encode("ascii")],
+            exclude=[previous_sha.encode("ascii")],
+        )
+        return sum(1 for entry in walker if isinstance(entry.commit, Commit))
+
     def close(self) -> None:
         self.repo.close()
 

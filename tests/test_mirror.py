@@ -71,7 +71,16 @@ class _Fetched:
         self.closed = False
 
     def commits_since(self, previous_sha: str | None, *, max_count: int):
+        if previous_sha == self.head_sha:
+            return []
         return self._commits[:max_count]
+
+    def count_commits_since(self, previous_sha: str | None):
+        if previous_sha == self.head_sha:
+            return 0
+        if previous_sha:
+            return len(self._commits)
+        return None
 
     def close(self) -> None:
         self.closed = True
@@ -106,7 +115,6 @@ def _config(**overrides):
         "git_poller_default_schedule": "每日04-00",
         "git_poller_timezone": "Asia/Shanghai",
         "git_poller_default_branch": "main",
-        "git_poller_push_on_first_follow": False,
         "git_poller_proxy": None,
         "git_poller_timeout": 60.0,
         "git_poller_command_priority": 10,
@@ -116,7 +124,7 @@ def _config(**overrides):
     return SimpleNamespace(**values)
 
 
-def test_follow_repo_records_head_without_first_push():
+def test_follow_repo_records_head():
     state = _State()
     git_cache = _GitCache()
     service = mirror.GitPollerService(_config(), state=state, git_cache=git_cache)
@@ -124,26 +132,21 @@ def test_follow_repo_records_head_without_first_push():
     result = asyncio.run(service.follow_repo(10001, "https://example.test/repo"))
 
     assert result.already_following is False
-    assert result.payload is None
     assert result.subscription.last_success_sha == "newsha1234567890"
     assert state.get_subscription(10001, result.identity.key).url == "https://example.test/repo.git"
     assert git_cache.calls == [("peek", "https://example.test/repo.git", "main")]
 
 
-def test_follow_repo_can_prepare_first_push_payload():
+def test_follow_repo_accepts_branch_override():
     state = _State()
     git_cache = _GitCache()
-    service = mirror.GitPollerService(
-        _config(git_poller_push_on_first_follow=True),
-        state=state,
-        git_cache=git_cache,
-    )
+    service = mirror.GitPollerService(_config(), state=state, git_cache=git_cache)
 
-    result = asyncio.run(service.follow_repo(10001, "https://example.test/repo.git"))
+    result = asyncio.run(service.follow_repo(10001, "https://example.test/repo.git", "dev"))
 
-    assert result.payload is not None
-    assert result.subscription.last_success_sha is None
-    assert result.payload.target_sha == "newsha1234567890"
+    assert result.subscription.branch == "dev"
+    assert "-dev-" in result.identity.key
+    assert git_cache.calls == [("peek", "https://example.test/repo.git", "dev")]
 
 
 def test_follow_repo_detects_duplicate_in_same_group():
@@ -159,11 +162,25 @@ def test_follow_repo_detects_duplicate_in_same_group():
     assert len(git_cache.calls) == 1
 
 
-def test_pull_repo_builds_payload_from_group_subscription_and_marks_success():
+def test_follow_repo_allows_same_url_with_different_branches():
     state = _State()
     git_cache = _GitCache()
     service = mirror.GitPollerService(_config(), state=state, git_cache=git_cache)
-    identity = repository.build_identity("https://example.test/repo.git")
+
+    main = asyncio.run(service.follow_repo(10001, "https://example.test/repo"))
+    dev = asyncio.run(service.follow_repo(10001, "https://example.test/repo", "dev"))
+
+    assert main.identity.key != dev.identity.key
+    assert sorted(state.list_group_subscriptions(10001)) == sorted(
+        [main.identity.key, dev.identity.key]
+    )
+
+
+def test_pull_repo_updates_subscription_head_without_building_summary():
+    state = _State()
+    git_cache = _GitCache()
+    service = mirror.GitPollerService(_config(), state=state, git_cache=git_cache)
+    identity = repository.build_identity("https://example.test/repo.git", "main")
     state.upsert_subscription(
         10001,
         identity.key,
@@ -176,18 +193,64 @@ def test_pull_repo_builds_payload_from_group_subscription_and_marks_success():
     )
 
     result = asyncio.run(service.pull_repo(10001, "https://example.test/repo"))
-    service.mark_success(result)
 
-    assert result.payload.previous_sha == "oldsha123"
-    assert result.payload.commits[0].title == "New commit"
     assert state.successes == [(10001, identity.key, "newsha1234567890")]
+    assert result.previous_sha == "oldsha123"
+    assert result.target_sha == "newsha1234567890"
+
+
+def test_summarize_repo_builds_payload_without_marking_success():
+    state = _State()
+    git_cache = _GitCache()
+    service = mirror.GitPollerService(_config(), state=state, git_cache=git_cache)
+    identity = repository.build_identity("https://example.test/repo.git", "main")
+    state.upsert_subscription(
+        10001,
+        identity.key,
+        models.Subscription(
+            url=identity.url,
+            branch="main",
+            schedule="每日04-00",
+            last_success_sha="oldsha123",
+        ),
+    )
+
+    summary = asyncio.run(service.summarize_repo(10001, "https://example.test/repo"))
+
+    assert summary.behind_count == 1
+    assert summary.result.payload.previous_sha == "oldsha123"
+    assert summary.result.payload.commits[0].title == "New commit"
+    assert state.successes == []
+
+
+def test_summarize_repo_reports_same_head_with_empty_commits():
+    state = _State()
+    git_cache = _GitCache()
+    service = mirror.GitPollerService(_config(), state=state, git_cache=git_cache)
+    identity = repository.build_identity("https://example.test/repo.git", "main")
+    state.upsert_subscription(
+        10001,
+        identity.key,
+        models.Subscription(
+            url=identity.url,
+            branch="main",
+            schedule="每日04-00",
+            last_success_sha="newsha1234567890",
+        ),
+    )
+
+    summary = asyncio.run(service.summarize_repo(10001, "https://example.test/repo"))
+
+    assert summary.behind_count == 0
+    assert summary.result.payload.previous_sha == "newsha1234567890"
+    assert summary.result.payload.commits == []
 
 
 def test_poll_schedule_skips_unchanged_subscriptions():
     state = _State()
     git_cache = _GitCache()
     service = mirror.GitPollerService(_config(), state=state, git_cache=git_cache)
-    identity = repository.build_identity("https://example.test/repo.git")
+    identity = repository.build_identity("https://example.test/repo.git", "main")
     state.upsert_subscription(
         10001,
         identity.key,
@@ -208,7 +271,7 @@ def test_poll_schedule_returns_changed_subscriptions_per_group():
     state = _State()
     git_cache = _GitCache()
     service = mirror.GitPollerService(_config(), state=state, git_cache=git_cache)
-    identity = repository.build_identity("https://example.test/repo.git")
+    identity = repository.build_identity("https://example.test/repo.git", "main")
     for group_id in (10001, 10002):
         state.upsert_subscription(
             group_id,

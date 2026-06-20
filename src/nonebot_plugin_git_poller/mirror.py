@@ -9,7 +9,7 @@ from nonebot import logger
 from .config import Config
 from .git import GitRepositoryCache
 from .models import PollResult, RepositoryIdentity, Subscription, UpdatePayload
-from .repository import build_compare_url, build_identity
+from .repository import build_compare_url, build_identity, normalize_branch
 from .state import StateStore
 
 
@@ -18,7 +18,20 @@ class FollowResult:
     identity: RepositoryIdentity
     subscription: Subscription
     already_following: bool
-    payload: UpdatePayload | None = None
+
+
+@dataclass(frozen=True)
+class PullResult:
+    identity: RepositoryIdentity
+    subscription: Subscription
+    previous_sha: str | None
+    target_sha: str
+
+
+@dataclass(frozen=True)
+class SummaryResult:
+    result: PollResult
+    behind_count: int | None
 
 
 class GitPollerService:
@@ -34,20 +47,30 @@ class GitPollerService:
         self.git_cache = git_cache or GitRepositoryCache(config)
         self._lock = asyncio.Lock()
 
-    async def follow_repo(self, group_id: int, url: str) -> FollowResult:
+    async def follow_repo(self, group_id: int, url: str, branch: str | None = None) -> FollowResult:
         async with self._lock:
-            return await asyncio.to_thread(self._follow_repo_sync, group_id, url)
+            return await asyncio.to_thread(self._follow_repo_sync, group_id, url, branch)
 
-    async def pull_repo(self, group_id: int, url: str) -> PollResult:
+    async def pull_repo(self, group_id: int, url: str, branch: str | None = None) -> PullResult:
         async with self._lock:
-            return await asyncio.to_thread(self._pull_repo_sync, group_id, url)
+            return await asyncio.to_thread(self._pull_repo_sync, group_id, url, branch)
+
+    async def summarize_repo(self, group_id: int, url: str, branch: str | None = None) -> SummaryResult:
+        async with self._lock:
+            return await asyncio.to_thread(self._summarize_repo_sync, group_id, url, branch)
 
     async def poll_schedule(self, schedule: str) -> list[PollResult]:
         async with self._lock:
             return await asyncio.to_thread(self._poll_schedule_sync, schedule)
 
-    def unfollow_repo(self, group_id: int, url: str) -> tuple[RepositoryIdentity, bool]:
-        identity = build_identity(url)
+    def unfollow_repo(
+        self,
+        group_id: int,
+        url: str,
+        branch: str | None = None,
+    ) -> tuple[RepositoryIdentity, bool]:
+        target_branch = self._target_branch(branch)
+        identity = build_identity(url, target_branch)
         return identity, self.state.remove_subscription(group_id, identity.key)
 
     def list_group_subscriptions(self, group_id: int) -> dict[str, Subscription]:
@@ -69,8 +92,9 @@ class GitPollerService:
             _now_iso(),
         )
 
-    def _follow_repo_sync(self, group_id: int, url: str) -> FollowResult:
-        identity = build_identity(url)
+    def _follow_repo_sync(self, group_id: int, url: str, branch: str | None) -> FollowResult:
+        target_branch = self._target_branch(branch)
+        identity = build_identity(url, target_branch)
         existing = self.state.get_subscription(group_id, identity.key)
         if existing is not None:
             return FollowResult(
@@ -82,7 +106,7 @@ class GitPollerService:
         now = _now_iso()
         subscription = Subscription(
             url=identity.url,
-            branch=self.config.git_poller_default_branch,
+            branch=target_branch,
             schedule=self.config.git_poller_default_schedule,
             last_success_sha=None,
             enabled=True,
@@ -90,50 +114,79 @@ class GitPollerService:
             updated_at=now,
         )
 
-        if not self.config.git_poller_push_on_first_follow:
-            subscription.last_success_sha = self.git_cache.peek_head(
-                identity.url,
-                subscription.branch,
-            )
-            self.state.upsert_subscription(group_id, identity.key, subscription)
-            return FollowResult(
-                identity=identity,
-                subscription=subscription,
-                already_following=False,
-            )
+        subscription.last_success_sha = self.git_cache.peek_head(
+            identity.url,
+            subscription.branch,
+        )
+        self.state.upsert_subscription(group_id, identity.key, subscription)
+        return FollowResult(
+            identity=identity,
+            subscription=subscription,
+            already_following=False,
+        )
 
-        fetched = self.git_cache.fetch(identity.key, identity.url, subscription.branch)
+    def _pull_repo_sync(self, group_id: int, url: str, branch: str | None) -> PullResult:
+        identity, subscription = self._get_subscription(group_id, url, branch)
+        fetched = self.git_cache.fetch(identity.key, subscription.url, subscription.branch)
         try:
-            self.state.upsert_subscription(group_id, identity.key, subscription)
-            payload = self._build_payload(identity, subscription, fetched, None)
-            return FollowResult(
+            previous_sha = subscription.last_success_sha
+            self.state.update_last_success(
+                group_id,
+                identity.key,
+                fetched.head_sha,
+                _now_iso(),
+            )
+            subscription.last_success_sha = fetched.head_sha
+            return PullResult(
                 identity=identity,
                 subscription=subscription,
-                already_following=False,
-                payload=payload,
+                previous_sha=previous_sha,
+                target_sha=fetched.head_sha,
             )
         finally:
             fetched.close()
 
-    def _pull_repo_sync(self, group_id: int, url: str) -> PollResult:
-        identity = build_identity(url)
+    def _summarize_repo_sync(self, group_id: int, url: str, branch: str | None) -> SummaryResult:
+        identity, subscription = self._get_subscription(group_id, url, branch)
+        return self._poll_subscription(group_id, identity.key, identity, subscription)
+
+    def _get_subscription(
+        self,
+        group_id: int,
+        url: str,
+        branch: str | None,
+    ) -> tuple[RepositoryIdentity, Subscription]:
+        target_branch = self._target_branch(branch)
+        identity = build_identity(url, target_branch)
         subscription = self.state.get_subscription(group_id, identity.key)
         if subscription is None:
             raise KeyError("本群尚未关注这个仓库。")
+        return identity, subscription
 
-        fetched = self.git_cache.fetch(identity.key, subscription.url, subscription.branch)
+    def _poll_subscription(
+        self,
+        group_id: int,
+        repo_key: str,
+        identity: RepositoryIdentity,
+        subscription: Subscription,
+    ) -> SummaryResult:
+        fetched = self.git_cache.fetch(repo_key, subscription.url, subscription.branch)
         try:
+            behind_count = fetched.count_commits_since(subscription.last_success_sha)
             payload = self._build_payload(
                 identity,
                 subscription,
                 fetched,
                 subscription.last_success_sha,
             )
-            return PollResult(
-                group_id=group_id,
-                repo_key=identity.key,
-                subscription=subscription,
-                payload=payload,
+            return SummaryResult(
+                result=PollResult(
+                    group_id=group_id,
+                    repo_key=repo_key,
+                    subscription=subscription,
+                    payload=payload,
+                ),
+                behind_count=behind_count,
             )
         finally:
             fetched.close()
@@ -141,19 +194,17 @@ class GitPollerService:
     def _poll_schedule_sync(self, schedule: str) -> list[PollResult]:
         results: list[PollResult] = []
         for group_id, repo_key, subscription in self.state.subscriptions_for_schedule(schedule):
-            identity = build_identity(subscription.url)
+            identity = build_identity(subscription.url, subscription.branch)
             fetched = self.git_cache.fetch(repo_key, subscription.url, subscription.branch)
             try:
                 if not subscription.last_success_sha:
-                    if not self.config.git_poller_push_on_first_follow:
-                        self.state.update_last_success(
-                            group_id,
-                            repo_key,
-                            fetched.head_sha,
-                            _now_iso(),
-                        )
-                        continue
-                    previous_sha = None
+                    self.state.update_last_success(
+                        group_id,
+                        repo_key,
+                        fetched.head_sha,
+                        _now_iso(),
+                    )
+                    continue
                 else:
                     previous_sha = subscription.last_success_sha
                     if previous_sha == fetched.head_sha:
@@ -188,10 +239,13 @@ class GitPollerService:
         fetched,
         previous_sha: str | None,
     ) -> UpdatePayload:
-        commits = fetched.commits_since(
-            previous_sha,
-            max_count=self.config.git_poller_max_commits,
-        )
+        if previous_sha == fetched.head_sha:
+            commits = []
+        else:
+            commits = fetched.commits_since(
+                previous_sha,
+                max_count=self.config.git_poller_max_commits,
+            )
         return UpdatePayload(
             repo_key=identity.key,
             repo_url=subscription.url,
@@ -204,6 +258,11 @@ class GitPollerService:
             commits=commits,
             compare_url=build_compare_url(subscription.url, previous_sha, fetched.head_sha),
         )
+
+    def _target_branch(self, branch: str | None) -> str:
+        if branch is None:
+            return normalize_branch(self.config.git_poller_default_branch)
+        return normalize_branch(branch)
 
 
 def _now_iso() -> str:

@@ -34,20 +34,32 @@ def normalize_repo_url(url: str) -> str:
     return _clean_path(value)
 
 
-def repo_key_from_url(url: str) -> str:
+def repo_key_from_url(url: str, branch: str | None = None) -> str:
     normalized = normalize_repo_url(url)
-    digest = hashlib.sha1(normalized.encode("utf-8")).hexdigest()[:12]
-    return f"{display_name_from_url(normalized)}-{digest}"
+    key_source = normalized if branch is None else f"{normalized}#{normalize_branch(branch)}"
+    digest = hashlib.sha1(key_source.encode("utf-8")).hexdigest()[:12]
+    parts = [display_name_from_url(normalized)]
+    if branch is not None:
+        parts.append(_safe_key_part(normalize_branch(branch)))
+    parts.append(digest)
+    return "-".join(parts)
 
 
-def build_identity(url: str) -> RepositoryIdentity:
+def build_identity(url: str, branch: str | None = None) -> RepositoryIdentity:
     normalized = normalize_repo_url(url)
     return RepositoryIdentity(
-        key=repo_key_from_url(normalized),
+        key=repo_key_from_url(normalized, branch),
         url=normalized,
         display_name=display_name_from_url(normalized),
         web_url=web_url_from_git_url(normalized),
     )
+
+
+def normalize_branch(branch: str) -> str:
+    value = branch.strip()
+    if not value:
+        raise ValueError("分支名不能为空。")
+    return value
 
 
 def display_name_from_url(url: str) -> str:
@@ -130,3 +142,8 @@ def _normalize_netloc(parsed) -> str:
             userinfo = f"{userinfo}:{parsed.password}"
         return f"{userinfo}@{host}"
     return host
+
+
+def _safe_key_part(value: str) -> str:
+    safe = re.sub(r"[^A-Za-z0-9._-]+", "-", value).strip(".-")
+    return safe[:48] or "branch"

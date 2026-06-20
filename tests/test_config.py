@@ -41,6 +41,5 @@ def test_config_defaults_are_global_only():
     assert config.git_poller_default_schedule == "每日04-00"
     assert config.git_poller_timezone == "Asia/Shanghai"
     assert config.git_poller_default_branch == "main"
-    assert config.git_poller_push_on_first_follow is False
     assert config.git_poller_command_priority == 10
     assert config.git_poller_max_commits == 20

@@ -8,7 +8,6 @@ class Config(BaseModel):
     git_poller_default_schedule: str = "每日04-00"
     git_poller_timezone: str = "Asia/Shanghai"
     git_poller_default_branch: str = "main"
-    git_poller_push_on_first_follow: bool = False
 
     git_poller_proxy: str | None = None
     git_poller_timeout: float = Field(default=60.0, gt=0)
