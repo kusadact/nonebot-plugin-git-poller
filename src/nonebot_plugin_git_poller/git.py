@@ -1,16 +1,19 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone, timedelta
-from io import BytesIO, StringIO
+from io import BytesIO
 from pathlib import Path
 from typing import Any
 
 from dulwich import porcelain
+from dulwich.client import _import_remote_refs, get_transport_and_path
+from dulwich.config import StackedConfig, env_config
 from dulwich.errors import NotGitRepository
 from dulwich.objects import Blob, Commit, Tree
 from dulwich.repo import Repo
 from nonebot import logger
 from nonebot_plugin_localstore import get_plugin_cache_dir
+import os
 import urllib3
 
 from .config import Config
@@ -26,7 +29,6 @@ class GitRepositoryCache:
 
     def fetch(self, repo_key: str, url: str, branch: str) -> "FetchedRepository":
         repo_path = self.cache_dir / repo_key
-        transport_kwargs = self._transport_kwargs(url)
         fetch_result = None
         if not _looks_like_bare_repo(repo_path):
             if repo_path.exists():
@@ -38,19 +40,11 @@ class GitRepositoryCache:
                 bare=True,
                 branch=branch,
                 errstream=BytesIO(),
-                **transport_kwargs,
+                **self._porcelain_transport_kwargs(url),
             )
         else:
             logger.info(f"git poller fetching repository cache: {url} -> {repo_path}")
-            fetch_result = porcelain.fetch(
-                repo_path,
-                url,
-                errstream=BytesIO(),
-                outstream=StringIO(),
-                prune=True,
-                force=True,
-                **transport_kwargs,
-            )
+            fetch_result = self._fetch_existing_repo(repo_path, url)
 
         repo = Repo(repo_path)
         head_sha = _resolve_branch_head(repo, branch, remote_refs=getattr(fetch_result, "refs", None))
@@ -58,31 +52,70 @@ class GitRepositoryCache:
 
     def peek_head(self, url: str, branch: str) -> str:
         logger.info(f"git poller checking remote head: {url} branch={branch}")
-        result = porcelain.ls_remote(
+        client, path = get_transport_and_path(
             url,
-            **self._transport_kwargs(url),
+            config=self._git_config(),
+            quiet=True,
+            pool_manager=self._pool_manager(url),
         )
+        result = client.get_refs(_encode_path(path))
         head_sha = _resolve_remote_branch_head(result.refs, branch)
         logger.info(
             f"git poller remote head resolved: {url} branch={branch} sha={head_sha[:8]}"
         )
         return head_sha
 
-    def _transport_kwargs(self, url: str) -> dict[str, Any]:
+    def _porcelain_transport_kwargs(self, url: str) -> dict[str, Any]:
         kwargs: dict[str, Any] = {"quiet": True}
+        pool_manager = self._pool_manager(url)
+        if pool_manager is not None:
+            kwargs["pool_manager"] = pool_manager
+        return kwargs
+
+    def _fetch_existing_repo(self, repo_path: Path, url: str):
+        repo = Repo(repo_path)
+        try:
+            client, path = get_transport_and_path(
+                url,
+                config=repo.get_config_stack(),
+                quiet=True,
+                pool_manager=self._pool_manager(url),
+            )
+            fetch_result = client.fetch(
+                _encode_path(path),
+                repo,
+                progress=lambda data: None,
+            )
+            _import_remote_refs(
+                repo.refs,
+                "origin",
+                fetch_result.refs,
+                message=b"fetch: from " + url.encode("utf-8"),
+                prune=True,
+            )
+            return fetch_result
+        finally:
+            repo.close()
+
+    def _pool_manager(self, url: str) -> urllib3.PoolManager | urllib3.ProxyManager | None:
         if url.startswith(("http://", "https://")):
-            pool_manager: urllib3.PoolManager | urllib3.ProxyManager
             if self.config.git_poller_proxy:
-                pool_manager = urllib3.ProxyManager(
+                return urllib3.ProxyManager(
                     self.config.git_poller_proxy,
                     timeout=self.config.git_poller_timeout,
                 )
-            else:
-                pool_manager = urllib3.PoolManager(
-                    timeout=self.config.git_poller_timeout,
-                )
-            kwargs["pool_manager"] = pool_manager
-        return kwargs
+            return urllib3.PoolManager(
+                timeout=self.config.git_poller_timeout,
+            )
+        return None
+
+    @staticmethod
+    def _git_config() -> StackedConfig:
+        config = StackedConfig.default()
+        env_override = env_config(os.environ)
+        if env_override is not None:
+            config.backends.insert(0, env_override)
+        return config
 
 
 class FetchedRepository:
@@ -230,6 +263,10 @@ def _author_name(value: str) -> str:
 
 def _decode(value: bytes) -> str:
     return value.decode("utf-8", errors="replace")
+
+
+def _encode_path(path: str | bytes) -> bytes:
+    return path.encode("utf-8") if isinstance(path, str) else path
 
 
 def _has_object(repo: Repo, sha: str) -> bool:

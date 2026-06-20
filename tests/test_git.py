@@ -5,6 +5,7 @@ import sys
 import types
 from types import SimpleNamespace
 
+from dulwich.client import LsRemoteResult
 from dulwich.objects import Blob, Tree
 from dulwich import porcelain
 
@@ -81,6 +82,46 @@ def test_git_repository_cache_peeks_remote_head_without_clone(tmp_path: Path):
 
     assert cache.peek_head(str(source), "master") == head_sha
     assert not (tmp_path / "cache" / "repos" / "repo").exists()
+
+
+def test_git_repository_cache_peeks_http_head_without_porcelain_ls_remote(
+    tmp_path: Path,
+    monkeypatch,
+):
+    GitRepositoryCache = _load_git_module(tmp_path / "cache")
+    git_module = sys.modules["nonebot_plugin_git_poller.git"]
+    head_sha = "a" * 40
+    calls = {}
+
+    class FakeClient:
+        def get_refs(self, path: bytes):
+            calls["path"] = path
+            return LsRemoteResult({b"refs/heads/main": head_sha.encode("ascii")}, {})
+
+    def fake_get_transport_and_path(location: str, **kwargs):
+        calls["location"] = location
+        calls["kwargs"] = kwargs
+        return FakeClient(), "/owner/repo.git"
+
+    def fail_ls_remote(*args, **kwargs):
+        raise AssertionError("porcelain.ls_remote should not receive transport kwargs")
+
+    monkeypatch.setattr(git_module, "get_transport_and_path", fake_get_transport_and_path)
+    monkeypatch.setattr(git_module.porcelain, "ls_remote", fail_ls_remote)
+
+    cache = GitRepositoryCache(
+        SimpleNamespace(
+            git_poller_proxy="http://127.0.0.1:7890",
+            git_poller_timeout=12.5,
+        )
+    )
+
+    assert cache.peek_head("https://example.test/owner/repo.git", "main") == head_sha
+    assert calls["location"] == "https://example.test/owner/repo.git"
+    assert calls["path"] == b"/owner/repo.git"
+    assert calls["kwargs"]["quiet"] is True
+    assert calls["kwargs"]["config"] is not None
+    assert calls["kwargs"]["pool_manager"] is not None
 
 
 def test_export_head_tree_writes_symlink_as_plain_file(tmp_path: Path):
