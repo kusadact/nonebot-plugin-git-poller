@@ -353,6 +353,7 @@ async def run_scheduled_check(schedule: str) -> None:
                         title="拉取完成",
                     ),
                 )
+                service.mark_success(result.result)
             except ArchiveUploadUriError as exc:
                 logger.exception(
                     f"git poller scheduled archive upload URI failed: "
@@ -375,7 +376,6 @@ async def run_scheduled_check(schedule: str) -> None:
                     f"group={result.result.group_id}, repo={result.result.repo_key}"
                 )
                 continue
-            service.mark_success(result.result)
     except Exception:
         logger.exception(f"git poller scheduled check failed: {schedule}")
 

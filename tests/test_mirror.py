@@ -11,7 +11,9 @@ from helpers import load_plugin_module
 nonebot_module = types.ModuleType("nonebot")
 nonebot_module.logger = SimpleNamespace(
     debug=lambda *args, **kwargs: None,
+    exception=lambda *args, **kwargs: None,
     info=lambda *args, **kwargs: None,
+    warning=lambda *args, **kwargs: None,
 )
 nonebot_module.get_plugin_config = lambda config_cls: config_cls()
 localstore_module = types.ModuleType("nonebot_plugin_localstore")
@@ -112,6 +114,7 @@ class _GitCache:
         self.calls: list[tuple[str, str, str | None]] = []
         self.removed: list[str] = []
         self.cached_keys: set[str] = set()
+        self.fail_fetch_keys: set[str] = set()
         self.default_branch = "main"
         self.head_sha = "newsha1234567890"
         self.commits = [
@@ -127,6 +130,8 @@ class _GitCache:
 
     def fetch(self, repo_key: str, url: str, branch: str):
         self.calls.append((repo_key, url, branch))
+        if repo_key in self.fail_fetch_keys:
+            raise RuntimeError("fetch failed")
         return _Fetched(url, branch, self.head_sha, self.commits)
 
     def peek_head(self, url: str, branch: str):
@@ -536,3 +541,33 @@ def test_poll_schedule_returns_changed_subscriptions_per_group():
         "oldsha-10002",
     ]
     assert [delivery.archive.name for delivery in results] == ["repo.7z", "repo.7z"]
+
+
+def test_poll_schedule_continues_after_subscription_failure():
+    state = _State()
+    git_cache = _GitCache()
+    service = _service(state, git_cache)
+    first = repository.build_identity("https://example.test/bad.git", "main")
+    second = repository.build_identity("https://example.test/good.git", "main")
+    for identity in (first, second):
+        state.upsert_subscription(
+            10001,
+            identity.key,
+            models.Subscription(
+                url=identity.url,
+                branch="main",
+                schedule="每日04:00",
+                last_success_sha="oldsha123",
+            ),
+        )
+    git_cache.fail_fetch_keys = {first.key}
+
+    results = asyncio.run(service.poll_schedule("每日04:00"))
+
+    assert len(results) == 1
+    assert results[0].result.repo_key == second.key
+    assert results[0].result.payload.repo_name == "good"
+    assert git_cache.calls == [
+        (first.key, first.url, "main"),
+        (second.key, second.url, "main"),
+    ]
