@@ -9,6 +9,7 @@
 [![pypi](https://img.shields.io/pypi/v/nonebot-plugin-git-poller.svg)](https://pypi.org/project/nonebot-plugin-git-poller/)
 [![python](https://img.shields.io/badge/python-3.10|3.11|3.12|3.13-blue.svg)](https://www.python.org)
 [![uv](https://img.shields.io/badge/package%20manager-uv-black?style=flat-square&logo=uv)](https://github.com/astral-sh/uv)
+[![codecov](https://codecov.io/gh/kusadact/nonebot-plugin-git-poller/graph/badge.svg)](https://codecov.io/gh/kusadact/nonebot-plugin-git-poller)
 
 </div>
 
