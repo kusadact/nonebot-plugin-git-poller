@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+from pathlib import Path
 import sys
 import types
 from types import SimpleNamespace
@@ -82,6 +83,10 @@ class _Fetched:
             return len(self._commits)
         return None
 
+    def export_head_tree(self, target_dir: Path) -> None:
+        target_dir.mkdir(parents=True, exist_ok=True)
+        (target_dir / "README.md").write_text("archive", encoding="utf-8")
+
     def close(self) -> None:
         self.closed = True
 
@@ -110,6 +115,35 @@ class _GitCache:
         return self.head_sha
 
 
+class _ArchiveBuilder:
+    def __init__(self) -> None:
+        self.calls: list[tuple[str, str | None]] = []
+
+    def source_root(self, payload):
+        return Path("/tmp") / f"{payload.repo_key}-{payload.target_short_sha}"
+
+    def build(self, payload, subscription, source_dir):
+        self.calls.append((payload.repo_key, subscription.archive_password))
+        return SimpleNamespace(
+            path=Path("/tmp/archive.7z"),
+            name=f"{payload.repo_name}.7z",
+            password_used=subscription.archive_password is not None,
+        )
+
+
+def _service(
+    state: _State,
+    git_cache: _GitCache,
+    archive_builder: _ArchiveBuilder | None = None,
+):
+    return mirror.GitPollerService(
+        _config(),
+        state=state,
+        git_cache=git_cache,
+        archive_builder=archive_builder or _ArchiveBuilder(),
+    )
+
+
 def _config(**overrides):
     values = {
         "git_poller_default_schedule": "每日04-00",
@@ -117,6 +151,7 @@ def _config(**overrides):
         "git_poller_default_branch": "main",
         "git_poller_proxy": None,
         "git_poller_timeout": 60.0,
+        "git_poller_archive_password": None,
         "git_poller_command_priority": 10,
         "git_poller_max_commits": 20,
     }
@@ -127,7 +162,7 @@ def _config(**overrides):
 def test_follow_repo_records_head():
     state = _State()
     git_cache = _GitCache()
-    service = mirror.GitPollerService(_config(), state=state, git_cache=git_cache)
+    service = _service(state, git_cache)
 
     result = asyncio.run(service.follow_repo(10001, "https://example.test/repo"))
 
@@ -140,7 +175,7 @@ def test_follow_repo_records_head():
 def test_follow_repo_accepts_branch_override():
     state = _State()
     git_cache = _GitCache()
-    service = mirror.GitPollerService(_config(), state=state, git_cache=git_cache)
+    service = _service(state, git_cache)
 
     result = asyncio.run(service.follow_repo(10001, "https://example.test/repo.git", "dev"))
 
@@ -152,7 +187,7 @@ def test_follow_repo_accepts_branch_override():
 def test_follow_repo_detects_duplicate_in_same_group():
     state = _State()
     git_cache = _GitCache()
-    service = mirror.GitPollerService(_config(), state=state, git_cache=git_cache)
+    service = _service(state, git_cache)
 
     first = asyncio.run(service.follow_repo(10001, "https://example.test/repo"))
     second = asyncio.run(service.follow_repo(10001, "https://example.test/repo.git"))
@@ -165,7 +200,7 @@ def test_follow_repo_detects_duplicate_in_same_group():
 def test_follow_repo_allows_same_url_with_different_branches():
     state = _State()
     git_cache = _GitCache()
-    service = mirror.GitPollerService(_config(), state=state, git_cache=git_cache)
+    service = _service(state, git_cache)
 
     main = asyncio.run(service.follow_repo(10001, "https://example.test/repo"))
     dev = asyncio.run(service.follow_repo(10001, "https://example.test/repo", "dev"))
@@ -176,10 +211,11 @@ def test_follow_repo_allows_same_url_with_different_branches():
     )
 
 
-def test_pull_repo_updates_subscription_head_without_building_summary():
+def test_pull_repo_builds_archive_without_marking_success():
     state = _State()
     git_cache = _GitCache()
-    service = mirror.GitPollerService(_config(), state=state, git_cache=git_cache)
+    archive_builder = _ArchiveBuilder()
+    service = _service(state, git_cache, archive_builder)
     identity = repository.build_identity("https://example.test/repo.git", "main")
     state.upsert_subscription(
         10001,
@@ -194,15 +230,22 @@ def test_pull_repo_updates_subscription_head_without_building_summary():
 
     result = asyncio.run(service.pull_repo(10001, "https://example.test/repo"))
 
-    assert state.successes == [(10001, identity.key, "newsha1234567890")]
+    assert state.successes == []
     assert result.previous_sha == "oldsha123"
     assert result.target_sha == "newsha1234567890"
+    assert result.archive.name == "repo.7z"
+    assert archive_builder.calls == [(identity.key, None)]
+
+    service.mark_pull_success(10001, identity.key, result.target_sha)
+
+    assert state.successes == [(10001, identity.key, "newsha1234567890")]
 
 
 def test_summarize_repo_builds_payload_without_marking_success():
     state = _State()
     git_cache = _GitCache()
-    service = mirror.GitPollerService(_config(), state=state, git_cache=git_cache)
+    archive_builder = _ArchiveBuilder()
+    service = _service(state, git_cache, archive_builder)
     identity = repository.build_identity("https://example.test/repo.git", "main")
     state.upsert_subscription(
         10001,
@@ -226,7 +269,7 @@ def test_summarize_repo_builds_payload_without_marking_success():
 def test_summarize_repo_reports_same_head_with_empty_commits():
     state = _State()
     git_cache = _GitCache()
-    service = mirror.GitPollerService(_config(), state=state, git_cache=git_cache)
+    service = _service(state, git_cache)
     identity = repository.build_identity("https://example.test/repo.git", "main")
     state.upsert_subscription(
         10001,
@@ -249,7 +292,7 @@ def test_summarize_repo_reports_same_head_with_empty_commits():
 def test_poll_schedule_skips_unchanged_subscriptions():
     state = _State()
     git_cache = _GitCache()
-    service = mirror.GitPollerService(_config(), state=state, git_cache=git_cache)
+    service = _service(state, git_cache)
     identity = repository.build_identity("https://example.test/repo.git", "main")
     state.upsert_subscription(
         10001,
@@ -270,7 +313,7 @@ def test_poll_schedule_skips_unchanged_subscriptions():
 def test_poll_schedule_returns_changed_subscriptions_per_group():
     state = _State()
     git_cache = _GitCache()
-    service = mirror.GitPollerService(_config(), state=state, git_cache=git_cache)
+    service = _service(state, git_cache)
     identity = repository.build_identity("https://example.test/repo.git", "main")
     for group_id in (10001, 10002):
         state.upsert_subscription(
@@ -286,8 +329,9 @@ def test_poll_schedule_returns_changed_subscriptions_per_group():
 
     results = asyncio.run(service.poll_schedule("每日04-00"))
 
-    assert [result.group_id for result in results] == [10001, 10002]
-    assert [result.payload.previous_sha for result in results] == [
+    assert [delivery.result.group_id for delivery in results] == [10001, 10002]
+    assert [delivery.result.payload.previous_sha for delivery in results] == [
         "oldsha-10001",
         "oldsha-10002",
     ]
+    assert [delivery.archive.name for delivery in results] == ["repo.7z", "repo.7z"]

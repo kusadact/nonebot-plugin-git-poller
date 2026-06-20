@@ -88,6 +88,27 @@ def test_update_last_success_only_changes_target_subscription(tmp_path: Path):
     assert store.get_subscription(10001, "repo-b").last_success_sha is None
 
 
+def test_update_schedule_and_archive_password(tmp_path: Path):
+    state, models = _load_state_module(tmp_path)
+    store = state.StateStore()
+    store.upsert_subscription(
+        10001,
+        "repo-a",
+        models.Subscription(url="https://example.test/a.git", branch="main", schedule="每日04-00"),
+    )
+
+    store.update_schedule(10001, "repo-a", "星期一04-30", "2026-06-20T04:00:00+08:00")
+    store.update_archive_password(10001, "repo-a", "secret", "2026-06-20T04:01:00+08:00")
+
+    subscription = store.get_subscription(10001, "repo-a")
+    assert subscription.schedule == "星期一04-30"
+    assert subscription.archive_password == "secret"
+
+    store.update_archive_password(10001, "repo-a", None, "2026-06-20T04:02:00+08:00")
+
+    assert store.get_subscription(10001, "repo-a").archive_password is None
+
+
 def test_subscriptions_for_schedule_filters_enabled_entries(tmp_path: Path):
     state, models = _load_state_module(tmp_path)
     store = state.StateStore()

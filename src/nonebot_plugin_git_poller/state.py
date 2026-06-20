@@ -112,6 +112,43 @@ class StateStore:
             f"repo={repo_key}, sha={sha[:8]}"
         )
 
+    def update_schedule(
+        self,
+        group_id: int,
+        repo_key: str,
+        schedule: str,
+        updated_at: str,
+    ) -> Subscription:
+        subscription = self.get_subscription(group_id, repo_key)
+        if subscription is None:
+            raise KeyError(f"subscription not found: group={group_id}, repo={repo_key}")
+        subscription.schedule = schedule
+        subscription.updated_at = updated_at
+        self.upsert_subscription(group_id, repo_key, subscription)
+        logger.info(
+            f"git poller schedule updated: group={group_id}, repo={repo_key}, schedule={schedule}"
+        )
+        return subscription
+
+    def update_archive_password(
+        self,
+        group_id: int,
+        repo_key: str,
+        password: str | None,
+        updated_at: str,
+    ) -> Subscription:
+        subscription = self.get_subscription(group_id, repo_key)
+        if subscription is None:
+            raise KeyError(f"subscription not found: group={group_id}, repo={repo_key}")
+        subscription.archive_password = password
+        subscription.updated_at = updated_at
+        self.upsert_subscription(group_id, repo_key, subscription)
+        logger.info(
+            f"git poller archive password updated: group={group_id}, "
+            f"repo={repo_key}, has_password={password is not None}"
+        )
+        return subscription
+
     def subscriptions_for_schedule(
         self,
         schedule: str,

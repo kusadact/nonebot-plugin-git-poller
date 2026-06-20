@@ -26,6 +26,19 @@ async def send_update_to_group(bot: Bot, group_id: int, payload: UpdatePayload) 
     logger.info(f"git poller update sent to group {group_id}: {payload.repo_key}")
 
 
+async def upload_archive_to_group(bot: Bot, group_id: int, archive) -> None:
+    logger.info(
+        f"git poller uploading archive to group {group_id}: "
+        f"name={archive.name}, password={archive.password_used}"
+    )
+    await bot.upload_group_file(
+        group_id=int(group_id),
+        file=str(archive.path),
+        name=archive.name,
+    )
+    logger.info(f"git poller archive uploaded to group {group_id}: {archive.name}")
+
+
 def split_text(text: str, limit: int) -> list[str]:
     if limit <= 0:
         return [text]

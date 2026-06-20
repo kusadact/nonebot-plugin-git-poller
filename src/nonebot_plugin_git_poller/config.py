@@ -11,6 +11,7 @@ class Config(BaseModel):
 
     git_poller_proxy: str | None = None
     git_poller_timeout: float = Field(default=60.0, gt=0)
+    git_poller_archive_password: str | None = None
 
     git_poller_command_priority: int = 10
     git_poller_max_commits: int = Field(default=20, ge=1)

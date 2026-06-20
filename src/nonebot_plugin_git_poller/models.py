@@ -18,6 +18,7 @@ class Subscription:
     branch: str
     schedule: str
     last_success_sha: str | None = None
+    archive_password: str | None = None
     enabled: bool = True
     created_at: str = ""
     updated_at: str = ""
@@ -28,6 +29,7 @@ class Subscription:
             "branch": self.branch,
             "schedule": self.schedule,
             "last_success_sha": self.last_success_sha,
+            "archive_password": self.archive_password,
             "enabled": self.enabled,
             "created_at": self.created_at,
             "updated_at": self.updated_at,
@@ -42,6 +44,11 @@ class Subscription:
             last_success_sha=(
                 str(data["last_success_sha"])
                 if data.get("last_success_sha")
+                else None
+            ),
+            archive_password=(
+                str(data["archive_password"])
+                if data.get("archive_password")
                 else None
             ),
             enabled=bool(data.get("enabled", True)),

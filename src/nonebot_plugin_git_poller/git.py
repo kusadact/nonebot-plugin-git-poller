@@ -7,7 +7,7 @@ from typing import Any
 
 from dulwich import porcelain
 from dulwich.errors import NotGitRepository
-from dulwich.objects import Commit
+from dulwich.objects import Blob, Commit, Tree
 from dulwich.repo import Repo
 from nonebot import logger
 from nonebot_plugin_localstore import get_plugin_cache_dir
@@ -131,8 +131,41 @@ class FetchedRepository:
         )
         return sum(1 for entry in walker if isinstance(entry.commit, Commit))
 
+    def export_head_tree(self, target_dir: Path) -> None:
+        commit = self.repo.get_object(self.head_sha.encode("ascii"))
+        if not isinstance(commit, Commit):
+            raise TypeError(f"object is not a commit: {self.head_sha}")
+        target_dir.mkdir(parents=True, exist_ok=True)
+        tree = self.repo.get_object(commit.tree)
+        if not isinstance(tree, Tree):
+            raise TypeError(f"object is not a tree: {commit.tree!r}")
+        self._export_tree(tree, target_dir)
+
     def close(self) -> None:
         self.repo.close()
+
+    def _export_tree(self, tree: Tree, target_dir: Path) -> None:
+        for entry in tree.iteritems(name_order=True):
+            path = target_dir / entry.path.decode("utf-8", errors="replace")
+            mode = entry.mode
+            obj = self.repo.get_object(entry.sha)
+            if isinstance(obj, Tree):
+                path.mkdir(parents=True, exist_ok=True)
+                self._export_tree(obj, path)
+                continue
+            if not isinstance(obj, Blob):
+                logger.warning(f"git poller skipped non-blob object while exporting: {path}")
+                continue
+            path.parent.mkdir(parents=True, exist_ok=True)
+            data = obj.as_raw_string()
+            if _is_symlink_mode(mode):
+                # Keep archive generation inside the exported tree even when
+                # a repository contains links that point elsewhere.
+                path.write_text(data.decode("utf-8", errors="replace"), encoding="utf-8")
+                continue
+            path.write_bytes(data)
+            if _is_executable_mode(mode):
+                path.chmod(path.stat().st_mode | 0o111)
 
 
 def _resolve_branch_head(
@@ -205,6 +238,14 @@ def _has_object(repo: Repo, sha: str) -> bool:
     except KeyError:
         return False
     return True
+
+
+def _is_symlink_mode(mode: int) -> bool:
+    return mode == 0o120000
+
+
+def _is_executable_mode(mode: int) -> bool:
+    return mode == 0o100755
 
 
 def _looks_like_bare_repo(path: Path) -> bool:

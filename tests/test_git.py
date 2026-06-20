@@ -5,6 +5,7 @@ import sys
 import types
 from types import SimpleNamespace
 
+from dulwich.objects import Blob, Tree
 from dulwich import porcelain
 
 from helpers import load_plugin_module
@@ -61,6 +62,9 @@ def test_git_repository_cache_fetches_local_repo_updates(tmp_path: Path):
         assert fetched.head_sha == second_sha
         commits = fetched.commits_since(first_sha, max_count=20)
         assert [commit.title for commit in commits] == ["Second commit"]
+        export_dir = tmp_path / "export"
+        fetched.export_head_tree(export_dir)
+        assert (export_dir / "README.md").read_text(encoding="utf-8") == "two"
     finally:
         fetched.close()
 
@@ -77,3 +81,38 @@ def test_git_repository_cache_peeks_remote_head_without_clone(tmp_path: Path):
 
     assert cache.peek_head(str(source), "master") == head_sha
     assert not (tmp_path / "cache" / "repos" / "repo").exists()
+
+
+def test_export_head_tree_writes_symlink_as_plain_file(tmp_path: Path):
+    source = tmp_path / "source"
+    repo = porcelain.init(source)
+
+    link = Blob.from_string(b"../outside.txt")
+    repo.object_store.add_object(link)
+    tree = Tree()
+    tree.add(b"link", 0o120000, link.id)
+    repo.object_store.add_object(tree)
+    sha = porcelain.commit_tree(
+        repo,
+        tree.id,
+        message=b"Add symlink",
+        author=b"Alice <alice@example.test>",
+        committer=b"Alice <alice@example.test>",
+    ).decode("ascii")
+
+    GitRepositoryCache = _load_git_module(tmp_path / "cache")
+    cache = GitRepositoryCache(
+        SimpleNamespace(git_poller_proxy=None, git_poller_timeout=60.0)
+    )
+
+    fetched = cache.fetch("repo", str(source), "master")
+    try:
+        assert fetched.head_sha == sha
+        export_dir = tmp_path / "export"
+        fetched.export_head_tree(export_dir)
+        exported = export_dir / "link"
+        assert exported.is_file()
+        assert not exported.is_symlink()
+        assert exported.read_text(encoding="utf-8") == "../outside.txt"
+    finally:
+        fetched.close()

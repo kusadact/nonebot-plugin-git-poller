@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+from pathlib import Path
 import sys
 import types
 from types import SimpleNamespace
@@ -30,6 +31,9 @@ class _Bot:
 
     async def send_group_forward_msg(self, **kwargs: object) -> None:
         self.calls.append(("send_group_forward_msg", kwargs))
+
+    async def upload_group_file(self, **kwargs: object) -> None:
+        self.calls.append(("upload_group_file", kwargs))
 
 
 def _payload():
@@ -77,3 +81,15 @@ def test_send_update_to_group_uses_forward_message_only():
     assert bot.calls[0][0] == "send_group_forward_msg"
     assert bot.calls[0][1]["group_id"] == 10001
     assert len(bot.calls[0][1]["messages"]) == 2
+
+
+def test_upload_archive_to_group_uses_group_file_api():
+    bot = _Bot()
+    archive = SimpleNamespace(path=Path("/tmp/repo.7z"), name="repo.7z", password_used=False)
+
+    asyncio.run(message.upload_archive_to_group(bot, 10001, archive))
+
+    assert bot.calls[0][0] == "upload_group_file"
+    assert bot.calls[0][1]["group_id"] == 10001
+    assert bot.calls[0][1]["file"] == "/tmp/repo.7z"
+    assert bot.calls[0][1]["name"] == "repo.7z"
