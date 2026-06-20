@@ -14,7 +14,10 @@ from helpers import load_plugin_module
 
 def _load_git_module(cache_dir: Path):
     nonebot_module = types.ModuleType("nonebot")
-    nonebot_module.logger = SimpleNamespace(info=lambda *args, **kwargs: None)
+    nonebot_module.logger = SimpleNamespace(
+        info=lambda *args, **kwargs: None,
+        warning=lambda *args, **kwargs: None,
+    )
     nonebot_module.get_plugin_config = lambda config_cls: config_cls()
     localstore_module = types.ModuleType("nonebot_plugin_localstore")
     localstore_module.get_plugin_cache_dir = lambda: cache_dir
@@ -216,5 +219,38 @@ def test_export_head_tree_writes_symlink_as_plain_file(tmp_path: Path):
         assert exported.is_file()
         assert not exported.is_symlink()
         assert exported.read_text(encoding="utf-8") == "../outside.txt"
+    finally:
+        fetched.close()
+
+
+def test_export_head_tree_skips_paths_outside_target_dir(tmp_path: Path):
+    source = tmp_path / "source"
+    repo = porcelain.init(source)
+
+    blob = Blob.from_string(b"owned")
+    repo.object_store.add_object(blob)
+    tree = Tree()
+    tree.add(b"../../outside.txt", 0o100644, blob.id)
+    repo.object_store.add_object(tree)
+    sha = porcelain.commit_tree(
+        repo,
+        tree.id,
+        message=b"Add unsafe path",
+        author=b"Alice <alice@example.test>",
+        committer=b"Alice <alice@example.test>",
+    ).decode("ascii")
+
+    GitRepositoryCache = _load_git_module(tmp_path / "cache")
+    cache = GitRepositoryCache(
+        SimpleNamespace(git_poller_proxy=None, git_poller_timeout=60.0)
+    )
+
+    fetched = cache.fetch("repo", str(source), "master")
+    try:
+        assert fetched.head_sha == sha
+        export_dir = tmp_path / "export"
+        fetched.export_head_tree(export_dir)
+        assert not (tmp_path / "outside.txt").exists()
+        assert list(export_dir.rglob("*")) == []
     finally:
         fetched.close()

@@ -172,19 +172,26 @@ class FetchedRepository:
         tree = self.repo.get_object(commit.tree)
         if not isinstance(tree, Tree):
             raise TypeError(f"object is not a tree: {commit.tree!r}")
-        self._export_tree(tree, target_dir)
+        self._export_tree(tree, target_dir, target_dir.resolve())
 
     def close(self) -> None:
         self.repo.close()
 
-    def _export_tree(self, tree: Tree, target_dir: Path) -> None:
+    def _export_tree(self, tree: Tree, target_dir: Path, root_dir: Path) -> None:
         for entry in tree.iteritems(name_order=True):
-            path = target_dir / entry.path.decode("utf-8", errors="replace")
+            name = entry.path.decode("utf-8", errors="replace")
+            if not _safe_tree_entry_name(name):
+                logger.warning(f"git poller skipped unsafe tree path while exporting: {name!r}")
+                continue
+            path = _safe_export_path(target_dir, name, root_dir)
+            if path is None:
+                logger.warning(f"git poller skipped tree path outside export root: {name!r}")
+                continue
             mode = entry.mode
             obj = self.repo.get_object(entry.sha)
             if isinstance(obj, Tree):
                 path.mkdir(parents=True, exist_ok=True)
-                self._export_tree(obj, path)
+                self._export_tree(obj, path, root_dir)
                 continue
             if not isinstance(obj, Blob):
                 logger.warning(f"git poller skipped non-blob object while exporting: {path}")
@@ -273,6 +280,24 @@ def _author_name(value: str) -> str:
 
 def _decode(value: bytes) -> str:
     return value.decode("utf-8", errors="replace")
+
+
+def _safe_tree_entry_name(name: str) -> bool:
+    return (
+        name not in {"", ".", ".."}
+        and "/" not in name
+        and "\\" not in name
+        and not Path(name).is_absolute()
+    )
+
+
+def _safe_export_path(target_dir: Path, name: str, root_dir: Path) -> Path | None:
+    path = target_dir / name
+    try:
+        path.resolve().relative_to(root_dir)
+    except ValueError:
+        return None
+    return path
 
 
 def _encode_path(path: str | bytes) -> bytes:
