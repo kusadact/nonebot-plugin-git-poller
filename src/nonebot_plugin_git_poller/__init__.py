@@ -29,7 +29,7 @@ from .schedule import parse_schedule
 
 __plugin_meta__ = PluginMetadata(
     name="Git Poller",
-    description="按群订阅多个 Git 仓库并推送 commit 更新摘要",
+    description="按群订阅 Git 仓库更新，支持多仓库、多分支定时拉取",
     usage=(
         "/关注仓库 仓库url [--分支名]\n"
         "/取关仓库 仓库url [--分支名]\n"
