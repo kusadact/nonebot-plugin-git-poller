@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 from pathlib import Path
 import sys
+import tempfile
 import threading
 import types
 from types import SimpleNamespace
@@ -153,9 +154,10 @@ class _ArchiveBuilder:
         self.removed_archives: list[str] = []
         self.removed_repo_keys: list[str] = []
         self.removed_except: set[str] | None = None
+        self.source_parent = Path(tempfile.mkdtemp(prefix="git-poller-test-"))
 
     def source_root(self, payload):
-        return Path("/tmp") / f"{payload.repo_key}-{payload.target_short_sha}"
+        return self.source_parent / f"{payload.repo_key}-{payload.target_short_sha}"
 
     def build(self, payload, subscription, source_dir):
         self.calls.append((payload.repo_key, subscription.archive_password))
