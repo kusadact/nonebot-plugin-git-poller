@@ -55,7 +55,7 @@ def test_git_repository_cache_fetches_local_repo_updates(tmp_path: Path):
     fetched = cache.fetch("repo", str(source), "master")
     try:
         assert fetched.head_sha == first_sha
-        assert fetched.commits_since(None, max_count=20)[0].title == "Initial commit"
+        assert fetched.commits_since(None)[0].title == "Initial commit"
     finally:
         fetched.close()
 
@@ -64,7 +64,7 @@ def test_git_repository_cache_fetches_local_repo_updates(tmp_path: Path):
     fetched = cache.fetch("repo", str(source), "master")
     try:
         assert fetched.head_sha == second_sha
-        commits = fetched.commits_since(first_sha, max_count=20)
+        commits = fetched.commits_since(first_sha)
         assert [commit.title for commit in commits] == ["Second commit"]
         export_dir = tmp_path / "export"
         fetched.export_head_tree(export_dir)
@@ -73,7 +73,7 @@ def test_git_repository_cache_fetches_local_repo_updates(tmp_path: Path):
         fetched.close()
 
 
-def test_git_repository_cache_peeks_remote_head_without_clone(tmp_path: Path):
+def test_git_repository_cache_resolves_remote_head_without_clone(tmp_path: Path):
     source = tmp_path / "source"
     porcelain.init(source)
     head_sha = _commit(source, "README.md", "one", "Initial commit")
@@ -83,7 +83,10 @@ def test_git_repository_cache_peeks_remote_head_without_clone(tmp_path: Path):
         SimpleNamespace(git_poller_proxy=None, git_poller_timeout=60.0)
     )
 
-    assert cache.peek_head(str(source), "master") == head_sha
+    remote_head = cache.resolve_remote_head(str(source), "master")
+
+    assert remote_head.branch == "master"
+    assert remote_head.sha == head_sha
     assert not (tmp_path / "cache" / "repos" / "repo").exists()
 
 
@@ -100,7 +103,7 @@ def test_git_repository_cache_lists_cached_repo_keys(tmp_path: Path):
     assert cache.cached_repo_keys() == {"repo-key"}
 
 
-def test_git_repository_cache_peeks_http_head_without_porcelain_ls_remote(
+def test_git_repository_cache_resolves_http_head_without_porcelain_ls_remote(
     tmp_path: Path,
     monkeypatch,
 ):
@@ -132,7 +135,10 @@ def test_git_repository_cache_peeks_http_head_without_porcelain_ls_remote(
         )
     )
 
-    assert cache.peek_head("https://example.test/owner/repo.git", "main") == head_sha
+    remote_head = cache.resolve_remote_head("https://example.test/owner/repo.git", "main")
+
+    assert remote_head.branch == "main"
+    assert remote_head.sha == head_sha
     assert calls["location"] == "https://example.test/owner/repo.git"
     assert calls["path"] == b"/owner/repo.git"
     assert calls["kwargs"]["quiet"] is True
@@ -239,7 +245,7 @@ def test_git_repository_cache_does_not_fallback_to_head_for_missing_branch(
     )
 
     try:
-        cache.peek_head("https://example.test/owner/repo.git", "dev")
+        cache.resolve_remote_head("https://example.test/owner/repo.git", "dev")
     except RuntimeError as exc:
         assert "找不到分支：dev" in str(exc)
     else:
@@ -268,7 +274,10 @@ def test_git_repository_cache_allows_explicit_head_branch(
         SimpleNamespace(git_poller_proxy=None, git_poller_timeout=60.0)
     )
 
-    assert cache.peek_head("https://example.test/owner/repo.git", "HEAD") == head_sha
+    remote_head = cache.resolve_remote_head("https://example.test/owner/repo.git", "HEAD")
+
+    assert remote_head.branch == "HEAD"
+    assert remote_head.sha == head_sha
 
 
 def test_export_head_tree_writes_symlink_as_plain_file(tmp_path: Path):

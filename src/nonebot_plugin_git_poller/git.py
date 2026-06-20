@@ -58,9 +58,6 @@ class GitRepositoryCache:
         head_sha = _resolve_branch_head(repo, branch, remote_refs=getattr(fetch_result, "refs", None))
         return FetchedRepository(repo=repo, url=url, branch=branch, head_sha=head_sha)
 
-    def peek_head(self, url: str, branch: str) -> str:
-        return self.resolve_remote_head(url, branch).sha
-
     def resolve_remote_head(self, url: str, branch: str | None = None) -> RemoteHead:
         logger.info(f"git poller checking remote head: {url} branch={branch or '<default>'}")
         client, path = get_transport_and_path(
@@ -172,7 +169,7 @@ class FetchedRepository:
             raise TypeError(f"object is not a commit: {sha}")
         return _commit_to_info(commit, self.url)
 
-    def commits_since(self, previous_sha: str | None, *, max_count: int) -> list[CommitInfo]:
+    def commits_since(self, previous_sha: str | None) -> list[CommitInfo]:
         if previous_sha and _has_object(self.repo, previous_sha):
             include = [self.head_sha.encode("ascii")]
             exclude = [previous_sha.encode("ascii")]
@@ -180,7 +177,6 @@ class FetchedRepository:
                 include=include,
                 exclude=exclude,
                 reverse=True,
-                max_entries=max_count,
             )
             commits = [
                 _commit_to_info(entry.commit, self.url)

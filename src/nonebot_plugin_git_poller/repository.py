@@ -36,23 +36,39 @@ def normalize_repo_url(url: str) -> str:
 
 def repo_key_from_url(url: str, branch: str | None = None) -> str:
     normalized = normalize_repo_url(url)
-    key_source = normalized if branch is None else f"{normalized}#{normalize_branch(branch)}"
-    digest = hashlib.sha1(key_source.encode("utf-8")).hexdigest()[:12]
-    parts = [display_name_from_url(normalized)]
-    if branch is not None:
-        parts.append(_safe_key_part(normalize_branch(branch)))
-    parts.append(digest)
-    return "-".join(parts)
+    normalized_branch = normalize_branch(branch) if branch is not None else None
+    return _repo_key_from_normalized_url(normalized, normalized_branch)
 
 
 def build_identity(url: str, branch: str | None = None) -> RepositoryIdentity:
     normalized = normalize_repo_url(url)
+    return build_identity_from_normalized_url(normalized, branch)
+
+
+def build_identity_from_normalized_url(
+    normalized_url: str,
+    branch: str | None = None,
+) -> RepositoryIdentity:
+    normalized_branch = normalize_branch(branch) if branch is not None else None
     return RepositoryIdentity(
-        key=repo_key_from_url(normalized, branch),
-        url=normalized,
-        display_name=display_name_from_url(normalized),
-        web_url=web_url_from_git_url(normalized),
+        key=_repo_key_from_normalized_url(normalized_url, normalized_branch),
+        url=normalized_url,
+        display_name=display_name_from_url(normalized_url),
+        web_url=web_url_from_git_url(normalized_url),
     )
+
+
+def _repo_key_from_normalized_url(
+    normalized: str,
+    normalized_branch: str | None,
+) -> str:
+    key_source = normalized if normalized_branch is None else f"{normalized}#{normalized_branch}"
+    digest = hashlib.sha1(key_source.encode("utf-8")).hexdigest()[:12]
+    parts = [display_name_from_url(normalized)]
+    if normalized_branch is not None:
+        parts.append(_safe_key_part(normalized_branch))
+    parts.append(digest)
+    return "-".join(parts)
 
 
 def normalize_branch(branch: str) -> str:
@@ -104,7 +120,7 @@ def build_compare_url(repo_url: str, from_sha: str | None, to_sha: str) -> str |
     web_url = web_url_from_git_url(repo_url)
     if not web_url:
         return None
-    separator = "..." if _uses_github_routes(web_url) else "..."
+    separator = "..."
     path = f"/-/compare/{from_sha}{separator}{to_sha}" if _uses_gitlab_routes(web_url) else f"/compare/{from_sha}{separator}{to_sha}"
     return f"{web_url}{path}"
 
@@ -112,10 +128,6 @@ def build_compare_url(repo_url: str, from_sha: str | None, to_sha: str) -> str |
 def _uses_gitlab_routes(web_url: str) -> bool:
     host = urlparse(web_url).netloc.lower()
     return "gitlab" in host or "gitgud.io" in host
-
-
-def _uses_github_routes(web_url: str) -> bool:
-    return "github.com" in urlparse(web_url).netloc.lower()
 
 
 def _clean_path(path: str) -> str:

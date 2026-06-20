@@ -24,7 +24,11 @@ def register_archive_file_route(config: Config) -> bool:
     if server_app is None or not hasattr(server_app, "add_api_route"):
         message = "git poller archive HTTP route is unavailable: current driver has no server_app"
         if config.git_poller_file_base_url:
-            raise RuntimeError(f"{message}, but git_poller_file_base_url is configured")
+            raise RuntimeError(
+                f"{message}. git_poller_file_base_url is configured, so OneBot needs "
+                "an HTTP route to download archives. Use a driver with server_app support "
+                "or unset git_poller_file_base_url."
+            )
         logger.warning(message)
         return False
 

@@ -89,28 +89,6 @@ async def upload_archive_to_group(
     logger.info(f"git poller archive uploaded to group {group_id}: {archive.name}")
 
 
-def split_text(text: str, limit: int) -> list[str]:
-    if limit <= 0:
-        return [text]
-    chunks: list[str] = []
-    current = ""
-    for line in text.splitlines(keepends=True):
-        if len(line) > limit:
-            if current:
-                chunks.append(current.rstrip())
-                current = ""
-            for start in range(0, len(line), limit):
-                chunks.append(line[start : start + limit].rstrip())
-            continue
-        if current and len(current) + len(line) > limit:
-            chunks.append(current.rstrip())
-            current = ""
-        current += line
-    if current:
-        chunks.append(current.rstrip())
-    return chunks or [""]
-
-
 def _summary_text(payload: UpdatePayload) -> str:
     items = [
         f"仓库更新：{payload.repo_name}",

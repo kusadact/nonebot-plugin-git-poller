@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 from pathlib import Path
 import sys
+import threading
 import types
 from types import SimpleNamespace
 
@@ -89,10 +90,10 @@ class _Fetched:
         self._commits = commits
         self.closed = False
 
-    def commits_since(self, previous_sha: str | None, *, max_count: int):
+    def commits_since(self, previous_sha: str | None):
         if previous_sha == self.head_sha:
             return []
-        return self._commits[:max_count]
+        return self._commits
 
     def count_commits_since(self, previous_sha: str | None):
         if previous_sha == self.head_sha:
@@ -133,10 +134,6 @@ class _GitCache:
         if repo_key in self.fail_fetch_keys:
             raise RuntimeError("fetch failed")
         return _Fetched(url, branch, self.head_sha, self.commits)
-
-    def peek_head(self, url: str, branch: str):
-        self.calls.append(("peek", url, branch))
-        return self.head_sha
 
     def resolve_remote_head(self, url: str, branch: str | None = None):
         self.calls.append(("resolve", url, branch))
@@ -206,6 +203,10 @@ def _config(**overrides):
     }
     values.update(overrides)
     return SimpleNamespace(**values)
+
+
+async def _collect_async(async_iterable):
+    return [item async for item in async_iterable]
 
 
 def test_follow_repo_records_head():
@@ -316,6 +317,48 @@ def test_pull_repo_without_branch_uses_unique_local_subscription():
     assert result.subscription.branch == "main"
     assert ("resolve", "https://example.test/repo.git", None) not in git_cache.calls
     assert git_cache.calls[-1] == (identity.key, identity.url, "main")
+
+
+def test_list_group_subscriptions_does_not_wait_for_slow_pull_fetch():
+    state = _State()
+    git_cache = _GitCache()
+    fetch_started = threading.Event()
+    release_fetch = threading.Event()
+
+    def slow_fetch(repo_key: str, url: str, branch: str):
+        git_cache.calls.append((repo_key, url, branch))
+        fetch_started.set()
+        assert release_fetch.wait(timeout=2)
+        return _Fetched(url, branch, git_cache.head_sha, git_cache.commits)
+
+    git_cache.fetch = slow_fetch
+    service = _service(state, git_cache)
+    identity = repository.build_identity("https://example.test/repo.git", "main")
+    state.upsert_subscription(
+        10001,
+        identity.key,
+        models.Subscription(
+            url=identity.url,
+            branch="main",
+            schedule="每日04:00",
+            last_success_sha="oldsha123",
+        ),
+    )
+
+    async def _run() -> None:
+        pull_task = asyncio.create_task(service.pull_repo(10001, "https://example.test/repo"))
+        assert await asyncio.to_thread(fetch_started.wait, 2)
+        try:
+            subscriptions = await asyncio.wait_for(
+                asyncio.to_thread(service.list_group_subscriptions, 10001),
+                timeout=0.2,
+            )
+            assert list(subscriptions) == [identity.key]
+        finally:
+            release_fetch.set()
+        await pull_task
+
+    asyncio.run(_run())
 
 
 def test_unbranched_repo_command_requires_branch_when_multiple_subscriptions_exist():
@@ -511,7 +554,7 @@ def test_poll_schedule_skips_unchanged_subscriptions():
         ),
     )
 
-    results = asyncio.run(service.poll_schedule("每日04:00"))
+    results = asyncio.run(_collect_async(service.poll_schedule("每日04:00")))
 
     assert results == []
 
@@ -533,7 +576,7 @@ def test_poll_schedule_returns_changed_subscriptions_per_group():
             ),
         )
 
-    results = asyncio.run(service.poll_schedule("每日04:00"))
+    results = asyncio.run(_collect_async(service.poll_schedule("每日04:00")))
 
     assert [delivery.result.group_id for delivery in results] == [10001, 10002]
     assert [delivery.result.payload.previous_sha for delivery in results] == [
@@ -541,6 +584,35 @@ def test_poll_schedule_returns_changed_subscriptions_per_group():
         "oldsha-10002",
     ]
     assert [delivery.archive.name for delivery in results] == ["repo.7z", "repo.7z"]
+
+
+def test_poll_schedule_builds_archives_as_results_are_consumed():
+    state = _State()
+    git_cache = _GitCache()
+    archive_builder = _ArchiveBuilder()
+    service = _service(state, git_cache, archive_builder)
+    identity = repository.build_identity("https://example.test/repo.git", "main")
+    for group_id in (10001, 10002):
+        state.upsert_subscription(
+            group_id,
+            identity.key,
+            models.Subscription(
+                url=identity.url,
+                branch="main",
+                schedule="每日04:00",
+                last_success_sha=f"oldsha-{group_id}",
+            ),
+        )
+
+    async def _first_result():
+        async for result in service.poll_schedule("每日04:00"):
+            return result
+        raise AssertionError("expected one scheduled result")
+
+    result = asyncio.run(_first_result())
+
+    assert result.result.group_id == 10001
+    assert archive_builder.calls == [(identity.key, None)]
 
 
 def test_poll_schedule_continues_after_subscription_failure():
@@ -562,7 +634,7 @@ def test_poll_schedule_continues_after_subscription_failure():
         )
     git_cache.fail_fetch_keys = {first.key}
 
-    results = asyncio.run(service.poll_schedule("每日04:00"))
+    results = asyncio.run(_collect_async(service.poll_schedule("每日04:00")))
 
     assert len(results) == 1
     assert results[0].result.repo_key == second.key

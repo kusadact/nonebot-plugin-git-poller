@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from datetime import datetime, timedelta
 
 from nonebot import get_bots, logger, on_command, require
@@ -336,8 +337,7 @@ async def run_scheduled_check(schedule: str) -> None:
         return
     bot = next(iter(bots.values()))
     try:
-        results = await service.poll_schedule(schedule)
-        for result in results:
+        async for result in service.poll_schedule(schedule):
             try:
                 await upload_archive_to_group(
                     bot,
@@ -382,7 +382,7 @@ async def run_scheduled_check(schedule: str) -> None:
 
 async def cleanup_unsubscribed_repo(repo_key: str) -> None:
     try:
-        service.cleanup_unsubscribed_repo(repo_key)
+        await asyncio.to_thread(service.cleanup_unsubscribed_repo, repo_key)
     except Exception:
         logger.exception(f"git poller delayed cleanup failed: repo={repo_key}")
 
@@ -433,8 +433,8 @@ def _schedule_repo_cleanup(repo_key: str) -> None:
     logger.info(f"git poller delayed cleanup scheduled: repo={repo_key}, run_at={run_at}")
 
 
-def _repo_args(args: Message, *, allow_tail: bool = False):
-    return parse_repo_command_args(str(args), allow_tail=allow_tail)
+def _repo_args(args: Message):
+    return parse_repo_command_args(str(args))
 
 
 def _same_config_session(event: GroupMessageEvent, matcher: Matcher) -> bool:

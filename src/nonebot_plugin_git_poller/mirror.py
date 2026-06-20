@@ -12,10 +12,14 @@ from .archive import ArchiveBuilder, ArchiveFile
 from .config import Config
 from .git import GitRepositoryCache
 from .models import PollResult, RepositoryIdentity, Subscription, UpdatePayload
-from .repository import build_compare_url, build_identity, normalize_branch
+from .repository import (
+    build_compare_url,
+    build_identity,
+    build_identity_from_normalized_url,
+    normalize_branch,
+    normalize_repo_url,
+)
 from .state import StateStore
-
-MAX_COMMITS = 20
 
 
 @dataclass(frozen=True)
@@ -63,6 +67,7 @@ class GitPollerService:
             config.git_poller_archive_password
         )
         self._lock = asyncio.Lock()
+        # Protect StateStore's read-modify-write JSON operations only.
         self._state_lock = RLock()
 
     async def follow_repo(self, group_id: int, url: str, branch: str | None = None) -> FollowResult:
@@ -77,9 +82,25 @@ class GitPollerService:
         async with self._lock:
             return await asyncio.to_thread(self._summarize_repo_sync, group_id, url, branch)
 
-    async def poll_schedule(self, schedule: str) -> list[DeliveryResult]:
-        async with self._lock:
-            return await asyncio.to_thread(self._poll_schedule_sync, schedule)
+    async def poll_schedule(self, schedule: str):
+        subscriptions = await asyncio.to_thread(self._subscriptions_for_schedule_sync, schedule)
+        for group_id, repo_key, subscription in subscriptions:
+            try:
+                async with self._lock:
+                    result = await asyncio.to_thread(
+                        self._poll_scheduled_subscription_sync,
+                        group_id,
+                        repo_key,
+                        subscription,
+                    )
+            except Exception:
+                logger.exception(
+                    f"git poller scheduled subscription failed: "
+                    f"group={group_id}, repo={repo_key}"
+                )
+                continue
+            if result is not None:
+                yield result
 
     def update_repo_schedule(
         self,
@@ -121,14 +142,17 @@ class GitPollerService:
         url: str,
         branch: str | None = None,
     ) -> tuple[RepositoryIdentity, bool]:
+        archive_path: str | None = None
         with self._state_lock:
             identity, existing = self._find_subscription(group_id, url, branch)
             if existing is None:
                 return identity, False
             removed = self.state.remove_subscription(group_id, identity.key)
-            if removed and existing.last_archive_path:
-                self.archive_builder.remove_archive(existing.last_archive_path)
-            return identity, removed
+            if removed:
+                archive_path = existing.last_archive_path
+        if archive_path:
+            self.archive_builder.remove_archive(archive_path)
+        return identity, removed
 
     def get_repo_subscription(
         self,
@@ -167,16 +191,17 @@ class GitPollerService:
 
     def cleanup_unsubscribed_repo(self, repo_key: str) -> bool:
         with self._state_lock:
-            if self.state.is_repo_key_subscribed(repo_key):
-                logger.info(f"git poller cleanup skipped for subscribed repo: {repo_key}")
-                return False
-            removed_cache = self.git_cache.remove_cache(repo_key)
-            removed_archives = self.archive_builder.remove_archives_for_repo(repo_key)
-            logger.info(
-                f"git poller cleanup finished: repo={repo_key}, "
-                f"cache={removed_cache}, archives={removed_archives}"
-            )
-            return removed_cache or bool(removed_archives)
+            is_subscribed = self.state.is_repo_key_subscribed(repo_key)
+        if is_subscribed:
+            logger.info(f"git poller cleanup skipped for subscribed repo: {repo_key}")
+            return False
+        removed_cache = self.git_cache.remove_cache(repo_key)
+        removed_archives = self.archive_builder.remove_archives_for_repo(repo_key)
+        logger.info(
+            f"git poller cleanup finished: repo={repo_key}, "
+            f"cache={removed_cache}, archives={removed_archives}"
+        )
+        return removed_cache or bool(removed_archives)
 
     def cleanup_orphaned_storage(self) -> tuple[int, int]:
         with self._state_lock:
@@ -185,25 +210,26 @@ class GitPollerService:
                 for subscriptions in self.state.list_all_subscriptions().values()
                 for repo_key in subscriptions
             }
-            removed_caches = 0
-            for repo_key in sorted(self.git_cache.cached_repo_keys() - active_repo_keys):
-                if self.git_cache.remove_cache(repo_key):
-                    removed_caches += 1
-            removed_archives = self.archive_builder.remove_archives_except(active_repo_keys)
-            logger.info(
-                f"git poller orphan cleanup finished: "
-                f"cache={removed_caches}, archives={removed_archives}"
-            )
-            return removed_caches, removed_archives
+        removed_caches = 0
+        for repo_key in sorted(self.git_cache.cached_repo_keys() - active_repo_keys):
+            if self.git_cache.remove_cache(repo_key):
+                removed_caches += 1
+        removed_archives = self.archive_builder.remove_archives_except(active_repo_keys)
+        logger.info(
+            f"git poller orphan cleanup finished: "
+            f"cache={removed_caches}, archives={removed_archives}"
+        )
+        return removed_caches, removed_archives
 
     def _follow_repo_sync(self, group_id: int, url: str, branch: str | None) -> FollowResult:
+        normalized_url = normalize_repo_url(url)
+        remote_head = self.git_cache.resolve_remote_head(
+            normalized_url,
+            self._explicit_branch(branch),
+        )
+        target_branch = remote_head.branch
+        identity = build_identity_from_normalized_url(normalized_url, target_branch)
         with self._state_lock:
-            remote_head = self.git_cache.resolve_remote_head(
-                build_identity(url).url,
-                self._explicit_branch(branch),
-            )
-            target_branch = remote_head.branch
-            identity = build_identity(url, target_branch)
             existing = self.state.get_subscription(group_id, identity.key)
             if existing is not None:
                 return FollowResult(
@@ -234,31 +260,31 @@ class GitPollerService:
     def _pull_repo_sync(self, group_id: int, url: str, branch: str | None) -> PullResult:
         with self._state_lock:
             identity, subscription = self._get_subscription(group_id, url, branch)
-            fetched = self.git_cache.fetch(identity.key, subscription.url, subscription.branch)
-            try:
-                previous_sha = subscription.last_success_sha
-                payload = self._build_payload(identity, subscription, fetched, previous_sha)
-                archive = self._build_archive(
-                    payload,
-                    subscription,
-                    fetched,
-                    group_id=group_id,
-                )
-                return PullResult(
-                    identity=identity,
-                    subscription=subscription,
-                    previous_sha=previous_sha,
-                    target_sha=fetched.head_sha,
-                    payload=payload,
-                    archive=archive,
-                )
-            finally:
-                fetched.close()
+        fetched = self.git_cache.fetch(identity.key, subscription.url, subscription.branch)
+        try:
+            previous_sha = subscription.last_success_sha
+            payload = self._build_payload(identity, subscription, fetched, previous_sha)
+            archive = self._build_archive(
+                payload,
+                subscription,
+                fetched,
+                group_id=group_id,
+            )
+            return PullResult(
+                identity=identity,
+                subscription=subscription,
+                previous_sha=previous_sha,
+                target_sha=fetched.head_sha,
+                payload=payload,
+                archive=archive,
+            )
+        finally:
+            fetched.close()
 
     def _summarize_repo_sync(self, group_id: int, url: str, branch: str | None) -> SummaryResult:
         with self._state_lock:
             identity, subscription = self._get_subscription(group_id, url, branch)
-            return self._poll_subscription(group_id, identity.key, identity, subscription)
+        return self._poll_subscription(group_id, identity.key, identity, subscription)
 
     def _get_subscription(
         self,
@@ -299,63 +325,63 @@ class GitPollerService:
         finally:
             fetched.close()
 
-    def _poll_schedule_sync(self, schedule: str) -> list[DeliveryResult]:
+    def _subscriptions_for_schedule_sync(
+        self,
+        schedule: str,
+    ) -> list[tuple[int, str, Subscription]]:
         with self._state_lock:
-            results: list[DeliveryResult] = []
-            for group_id, repo_key, subscription in self.state.subscriptions_for_schedule(schedule):
-                try:
-                    identity = build_identity(subscription.url, subscription.branch)
-                    fetched = self.git_cache.fetch(repo_key, subscription.url, subscription.branch)
-                    try:
-                        if not subscription.last_success_sha:
-                            self.state.update_last_success(
-                                group_id,
-                                repo_key,
-                                fetched.head_sha,
-                                _now_iso(),
-                            )
-                            continue
-                        else:
-                            previous_sha = subscription.last_success_sha
-                            if previous_sha == fetched.head_sha:
-                                logger.debug(
-                                    f"git poller no update: group={group_id}, repo={repo_key}, "
-                                    f"head={fetched.head_sha[:8]}"
-                                )
-                                continue
+            return self.state.subscriptions_for_schedule(schedule)
 
-                        payload = self._build_payload(
-                            identity,
-                            subscription,
-                            fetched,
-                            previous_sha,
-                        )
-                        result = PollResult(
-                            group_id=group_id,
-                            repo_key=repo_key,
-                            subscription=subscription,
-                            payload=payload,
-                        )
-                        results.append(
-                            DeliveryResult(
-                                result=result,
-                                archive=self._build_archive(
-                                    payload,
-                                    subscription,
-                                    fetched,
-                                    group_id=group_id,
-                                ),
-                            )
-                        )
-                    finally:
-                        fetched.close()
-                except Exception:
-                    logger.exception(
-                        f"git poller scheduled subscription failed: "
-                        f"group={group_id}, repo={repo_key}"
+    def _poll_scheduled_subscription_sync(
+        self,
+        group_id: int,
+        repo_key: str,
+        subscription: Subscription,
+    ) -> DeliveryResult | None:
+        identity = build_identity(subscription.url, subscription.branch)
+        fetched = self.git_cache.fetch(repo_key, subscription.url, subscription.branch)
+        try:
+            if not subscription.last_success_sha:
+                with self._state_lock:
+                    self.state.update_last_success(
+                        group_id,
+                        repo_key,
+                        fetched.head_sha,
+                        _now_iso(),
                     )
-                    continue
-            return results
+                return None
+
+            previous_sha = subscription.last_success_sha
+            if previous_sha == fetched.head_sha:
+                logger.debug(
+                    f"git poller no update: group={group_id}, repo={repo_key}, "
+                    f"head={fetched.head_sha[:8]}"
+                )
+                return None
+
+            payload = self._build_payload(
+                identity,
+                subscription,
+                fetched,
+                previous_sha,
+            )
+            result = PollResult(
+                group_id=group_id,
+                repo_key=repo_key,
+                subscription=subscription,
+                payload=payload,
+            )
+            return DeliveryResult(
+                result=result,
+                archive=self._build_archive(
+                    payload,
+                    subscription,
+                    fetched,
+                    group_id=group_id,
+                ),
+            )
+        finally:
+            fetched.close()
 
     def _build_payload(
         self,
@@ -367,10 +393,7 @@ class GitPollerService:
         if previous_sha == fetched.head_sha:
             commits = []
         else:
-            commits = fetched.commits_since(
-                previous_sha,
-                max_count=MAX_COMMITS,
-            )
+            commits = fetched.commits_since(previous_sha)
         return UpdatePayload(
             repo_key=identity.key,
             repo_url=subscription.url,
@@ -394,22 +417,24 @@ class GitPollerService:
     ) -> ArchiveFile:
         if subscription.last_archive_path:
             self.archive_builder.remove_archive(subscription.last_archive_path)
-            self.state.update_last_archive_path(
-                group_id,
-                payload.repo_key,
-                None,
-                _now_iso(),
-            )
+            with self._state_lock:
+                self.state.update_last_archive_path(
+                    group_id,
+                    payload.repo_key,
+                    None,
+                    _now_iso(),
+                )
         source_dir = self.archive_builder.source_root(payload)
         try:
             fetched.export_head_tree(source_dir)
             archive = self.archive_builder.build(payload, subscription, source_dir)
-            self.state.update_last_archive_path(
-                group_id,
-                payload.repo_key,
-                str(archive.path),
-                _now_iso(),
-            )
+            with self._state_lock:
+                self.state.update_last_archive_path(
+                    group_id,
+                    payload.repo_key,
+                    str(archive.path),
+                    _now_iso(),
+                )
             return archive
         finally:
             shutil.rmtree(source_dir.parent, ignore_errors=True)
