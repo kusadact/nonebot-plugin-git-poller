@@ -5,6 +5,11 @@
 
 ## nonebot-plugin-git-poller
 
+[![LICENSE](https://img.shields.io/github/license/kusadact/nonebot-plugin-git-poller.svg)](./LICENSE)
+[![pypi](https://img.shields.io/pypi/v/nonebot-plugin-git-poller.svg)](https://pypi.org/project/nonebot-plugin-git-poller/)
+[![python](https://img.shields.io/badge/python-3.10|3.11|3.12|3.13-blue.svg)](https://www.python.org)
+[![uv](https://img.shields.io/badge/package%20manager-uv-black?style=flat-square&logo=uv)](https://github.com/astral-sh/uv)
+
 </div>
 
 按群订阅 Git 仓库更新的 NoneBot2 插件，支持多仓库、多分支定时拉取，自动推送 commit 更新摘要并上传源码压缩包。
@@ -14,7 +19,7 @@
 在 NoneBot 项目目录中安装插件：
 
 ```bash
-uv add git+https://github.com/kusadact/nonebot-plugin-git-poller.git
+uv add nonebot-plugin-git-poller
 ```
 
 在 `pyproject.toml` 中加载插件：
