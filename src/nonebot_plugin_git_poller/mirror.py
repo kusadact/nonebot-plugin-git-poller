@@ -5,6 +5,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 import shutil
 from threading import RLock
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from nonebot import logger
 
@@ -115,7 +116,7 @@ class GitPollerService:
                 group_id,
                 identity.key,
                 schedule,
-                _now_iso(),
+                _now_iso(self.config.git_poller_timezone),
             )
             return identity, subscription
 
@@ -132,7 +133,7 @@ class GitPollerService:
                 group_id,
                 identity.key,
                 password,
-                _now_iso(),
+                _now_iso(self.config.git_poller_timezone),
             )
             return identity, subscription
 
@@ -182,12 +183,12 @@ class GitPollerService:
                 result.group_id,
                 result.repo_key,
                 result.payload.target_sha,
-                _now_iso(),
+                _now_iso(self.config.git_poller_timezone),
             )
 
     def mark_pull_success(self, group_id: int, repo_key: str, target_sha: str) -> None:
         with self._state_lock:
-            self.state.update_last_success(group_id, repo_key, target_sha, _now_iso())
+            self.state.update_last_success(group_id, repo_key, target_sha, _now_iso(self.config.git_poller_timezone))
 
     def cleanup_unsubscribed_repo(self, repo_key: str) -> bool:
         with self._state_lock:
@@ -238,7 +239,7 @@ class GitPollerService:
                     already_following=True,
                 )
 
-            now = _now_iso()
+            now = _now_iso(self.config.git_poller_timezone)
             subscription = Subscription(
                 url=identity.url,
                 branch=target_branch,
@@ -338,6 +339,11 @@ class GitPollerService:
         repo_key: str,
         subscription: Subscription,
     ) -> DeliveryResult | None:
+        with self._state_lock:
+            fresh = self.state.get_subscription(group_id, repo_key)
+            if fresh is None:
+                return None
+            subscription = fresh
         identity = build_identity(subscription.url, subscription.branch)
         fetched = self.git_cache.fetch(repo_key, subscription.url, subscription.branch)
         try:
@@ -347,7 +353,7 @@ class GitPollerService:
                         group_id,
                         repo_key,
                         fetched.head_sha,
-                        _now_iso(),
+                        _now_iso(self.config.git_poller_timezone),
                     )
                 return None
 
@@ -402,7 +408,7 @@ class GitPollerService:
             previous_sha=previous_sha,
             target_sha=fetched.head_sha,
             target_short_sha=fetched.head_sha[:8],
-            generated_at=_now_iso(),
+            generated_at=_now_iso(self.config.git_poller_timezone),
             commits=commits,
             compare_url=build_compare_url(subscription.url, previous_sha, fetched.head_sha),
         )
@@ -422,7 +428,7 @@ class GitPollerService:
                     group_id,
                     payload.repo_key,
                     None,
-                    _now_iso(),
+                    _now_iso(self.config.git_poller_timezone),
                 )
         source_dir = self.archive_builder.source_root(payload)
         try:
@@ -433,7 +439,7 @@ class GitPollerService:
                     group_id,
                     payload.repo_key,
                     str(archive.path),
-                    _now_iso(),
+                    _now_iso(self.config.git_poller_timezone),
                 )
             return archive
         finally:
@@ -470,5 +476,10 @@ class GitPollerService:
         return normalize_branch(branch)
 
 
-def _now_iso() -> str:
+def _now_iso(timezone_name: str | None = None) -> str:
+    if timezone_name:
+        try:
+            return datetime.now(ZoneInfo(timezone_name)).isoformat(timespec="seconds")
+        except ZoneInfoNotFoundError:
+            logger.warning(f"git poller fell back to local timezone for timestamps: {timezone_name!r}")
     return datetime.now(timezone.utc).astimezone().isoformat(timespec="seconds")

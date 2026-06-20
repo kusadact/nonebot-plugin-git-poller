@@ -346,3 +346,94 @@ def test_export_head_tree_skips_paths_outside_target_dir(tmp_path: Path):
         assert list(export_dir.rglob("*")) == []
     finally:
         fetched.close()
+
+
+def test_commit_info_falls_back_to_sha_for_empty_message(tmp_path: Path):
+    source = tmp_path / "source"
+    repo = porcelain.init(source)
+
+    blob = Blob.from_string(b"data")
+    repo.object_store.add_object(blob)
+    tree = Tree()
+    tree.add(b"file.txt", 0o100644, blob.id)
+    repo.object_store.add_object(tree)
+    sha = porcelain.commit_tree(
+        repo,
+        tree.id,
+        message=b"",
+        author=b"Alice <alice@example.test>",
+        committer=b"Alice <alice@example.test>",
+    ).decode("ascii")
+
+    GitRepositoryCache = _load_git_module(tmp_path / "cache")
+    cache = GitRepositoryCache(
+        SimpleNamespace(git_poller_proxy=None, git_poller_timeout=60.0)
+    )
+
+    fetched = cache.fetch("repo", str(source), "master")
+    try:
+        assert fetched.head_commit().title == sha[:8]
+    finally:
+        fetched.close()
+
+
+def test_commits_since_caps_at_max_commits(tmp_path: Path):
+    git_module = _load_git_module(tmp_path / "cache")
+    max_commits = sys.modules["nonebot_plugin_git_poller.git"].MAX_COMMITS
+
+    source = tmp_path / "source"
+    porcelain.init(source)
+    first_sha = _commit(source, "f.txt", "0", "commit 0")
+    for index in range(1, max_commits + 5):
+        _commit(source, "f.txt", str(index), f"commit {index}")
+
+    cache = git_module(
+        SimpleNamespace(git_poller_proxy=None, git_poller_timeout=60.0)
+    )
+    fetched = cache.fetch("repo", str(source), "master")
+    try:
+        commits = fetched.commits_since(first_sha)
+        assert len(commits) == max_commits
+    finally:
+        fetched.close()
+
+
+def test_fetch_closes_repo_when_branch_resolution_fails(tmp_path: Path, monkeypatch):
+    source = tmp_path / "source"
+    porcelain.init(source)
+    _commit(source, "f.txt", "0", "init")
+
+    GitRepositoryCache = _load_git_module(tmp_path / "cache")
+    git_module = sys.modules["nonebot_plugin_git_poller.git"]
+    cache = GitRepositoryCache(
+        SimpleNamespace(git_poller_proxy=None, git_poller_timeout=60.0)
+    )
+    # Prime the cache so the next fetch takes the existing-repo path.
+    cache.fetch("repo", str(source), "master").close()
+
+    opened: list = []
+    real_repo = git_module.Repo
+
+    class TrackingRepo(real_repo):
+        def __init__(self, *args, **kwargs):
+            super().__init__(*args, **kwargs)
+            opened.append(self)
+            self.close_calls = 0
+
+        def close(self):
+            self.close_calls += 1
+            super().close()
+
+    monkeypatch.setattr(git_module, "Repo", TrackingRepo)
+
+    try:
+        cache.fetch("repo", str(source), "does-not-exist")
+    except RuntimeError as exc:
+        assert "找不到分支：does-not-exist" in str(exc)
+    else:
+        raise AssertionError("missing branch must raise")
+
+    assert opened, "expected fetch to open a Repo"
+    assert opened[-1].close_calls == 1
+
+

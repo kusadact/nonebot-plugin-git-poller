@@ -23,6 +23,9 @@ from .models import CommitInfo
 from .repository import build_commit_url
 
 
+MAX_COMMITS = 50
+
+
 @dataclass(frozen=True)
 class RemoteHead:
     branch: str
@@ -42,7 +45,7 @@ class GitRepositoryCache:
             if repo_path.exists():
                 raise NotGitRepository(str(repo_path))
             logger.info(f"git poller cloning repository cache: {url} -> {repo_path}")
-            porcelain.clone(
+            cloned = porcelain.clone(
                 url,
                 repo_path,
                 bare=True,
@@ -50,12 +53,17 @@ class GitRepositoryCache:
                 errstream=BytesIO(),
                 **self._porcelain_transport_kwargs(url),
             )
+            cloned.close()
         else:
             logger.info(f"git poller fetching repository cache: {url} -> {repo_path}")
             fetch_result = self._fetch_existing_repo(repo_path, url)
 
         repo = Repo(repo_path)
-        head_sha = _resolve_branch_head(repo, branch, remote_refs=getattr(fetch_result, "refs", None))
+        try:
+            head_sha = _resolve_branch_head(repo, branch, remote_refs=getattr(fetch_result, "refs", None))
+        except BaseException:
+            repo.close()
+            raise
         return FetchedRepository(repo=repo, url=url, branch=branch, head_sha=head_sha)
 
     def resolve_remote_head(self, url: str, branch: str | None = None) -> RemoteHead:
@@ -177,6 +185,7 @@ class FetchedRepository:
                 include=include,
                 exclude=exclude,
                 reverse=True,
+                max_entries=MAX_COMMITS,
             )
             commits = [
                 _commit_to_info(entry.commit, self.url)
@@ -345,7 +354,8 @@ def _is_head_branch(branch: str) -> bool:
 
 def _commit_to_info(commit: Commit, repo_url: str) -> CommitInfo:
     sha = commit.id.decode("ascii")
-    title = _decode(commit.message).splitlines()[0].strip() or sha[:8]
+    lines = _decode(commit.message).splitlines()
+    title = (lines[0].strip() if lines else "") or sha[:8]
     author = _author_name(_decode(commit.author))
     committed_at = _format_git_time(commit.commit_time, commit.commit_timezone)
     return CommitInfo(

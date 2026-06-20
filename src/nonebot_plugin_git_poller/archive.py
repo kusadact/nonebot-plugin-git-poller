@@ -65,9 +65,10 @@ class ArchiveBuilder:
         except ValueError:
             logger.warning(f"git poller refused to remove archive outside cache: {archive_path}")
             return False
-        if not archive_path.exists():
+        try:
+            archive_path.unlink()
+        except FileNotFoundError:
             return False
-        archive_path.unlink()
         logger.info(f"git poller removed archive: {archive_path}")
         return True
 
