@@ -99,9 +99,6 @@ def _payload():
 def _config(**overrides):
     values = {
         "git_poller_file_base_url": None,
-        "git_poller_file_route_prefix": "/git-poller/files",
-        "git_poller_file_token": "secret",
-        "git_poller_file_token_ttl": 3600,
     }
     values.update(overrides)
     return SimpleNamespace(**values)

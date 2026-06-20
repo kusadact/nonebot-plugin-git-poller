@@ -127,6 +127,76 @@ def test_git_repository_cache_peeks_http_head_without_porcelain_ls_remote(
     assert calls["kwargs"]["pool_manager"] is not None
 
 
+def test_git_repository_cache_resolves_remote_default_branch_from_symref(
+    tmp_path: Path,
+    monkeypatch,
+):
+    GitRepositoryCache = _load_git_module(tmp_path / "cache")
+    git_module = sys.modules["nonebot_plugin_git_poller.git"]
+    master_sha = "a" * 40
+    main_sha = "b" * 40
+
+    class FakeClient:
+        def get_refs(self, path: bytes):
+            return LsRemoteResult(
+                {
+                    b"HEAD": master_sha.encode("ascii"),
+                    b"refs/heads/master": master_sha.encode("ascii"),
+                    b"refs/heads/main": main_sha.encode("ascii"),
+                },
+                {b"HEAD": b"refs/heads/master"},
+            )
+
+    monkeypatch.setattr(
+        git_module,
+        "get_transport_and_path",
+        lambda location, **kwargs: (FakeClient(), "/owner/repo.git"),
+    )
+
+    cache = GitRepositoryCache(
+        SimpleNamespace(git_poller_proxy=None, git_poller_timeout=60.0)
+    )
+
+    remote_head = cache.resolve_remote_head("https://example.test/owner/repo.git")
+
+    assert remote_head.branch == "master"
+    assert remote_head.sha == master_sha
+
+
+def test_git_repository_cache_resolves_remote_default_branch_from_head_sha(
+    tmp_path: Path,
+    monkeypatch,
+):
+    GitRepositoryCache = _load_git_module(tmp_path / "cache")
+    git_module = sys.modules["nonebot_plugin_git_poller.git"]
+    head_sha = "a" * 40
+
+    class FakeClient:
+        def get_refs(self, path: bytes):
+            return LsRemoteResult(
+                {
+                    b"HEAD": head_sha.encode("ascii"),
+                    b"refs/heads/master": head_sha.encode("ascii"),
+                },
+                {},
+            )
+
+    monkeypatch.setattr(
+        git_module,
+        "get_transport_and_path",
+        lambda location, **kwargs: (FakeClient(), "/owner/repo.git"),
+    )
+
+    cache = GitRepositoryCache(
+        SimpleNamespace(git_poller_proxy=None, git_poller_timeout=60.0)
+    )
+
+    remote_head = cache.resolve_remote_head("https://example.test/owner/repo.git")
+
+    assert remote_head.branch == "master"
+    assert remote_head.sha == head_sha
+
+
 def test_git_repository_cache_does_not_fallback_to_head_for_missing_branch(
     tmp_path: Path,
     monkeypatch,

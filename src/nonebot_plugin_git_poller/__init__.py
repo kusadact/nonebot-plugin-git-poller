@@ -43,35 +43,36 @@ __plugin_meta__ = PluginMetadata(
 )
 
 service = GitPollerService(plugin_config)
+COMMAND_PRIORITY = 10
 
 follow_repo = on_command(
     "关注仓库",
-    priority=plugin_config.git_poller_command_priority,
+    priority=COMMAND_PRIORITY,
     block=True,
 )
 unfollow_repo = on_command(
     "取关仓库",
-    priority=plugin_config.git_poller_command_priority,
+    priority=COMMAND_PRIORITY,
     block=True,
 )
 configure_repo = on_command(
     "设置仓库",
-    priority=plugin_config.git_poller_command_priority,
+    priority=COMMAND_PRIORITY,
     block=True,
 )
 list_repos = on_command(
     "仓库列表",
-    priority=plugin_config.git_poller_command_priority,
+    priority=COMMAND_PRIORITY,
     block=True,
 )
 pull_repo = on_command(
     "拉取仓库",
-    priority=plugin_config.git_poller_command_priority,
+    priority=COMMAND_PRIORITY,
     block=True,
 )
 summarize_repo = on_command(
     "仓库摘要",
-    priority=plugin_config.git_poller_command_priority,
+    priority=COMMAND_PRIORITY,
     block=True,
 )
 
@@ -178,7 +179,7 @@ async def _(
         await matcher.finish("输入非法，已取消设置。")
     matcher.state["setting_choice"] = choice
     if choice == "1":
-        await matcher.send("请输入新的推送抓取时间，例如：每日04-30、星期一04-30、星期10430")
+        await matcher.send("请输入新的推送抓取时间，例如：每日04:00、每3天04:00、周一04:00")
     else:
         await matcher.send("请输入新的压缩包密码。输入 无 则清除当前仓库密码回到全局默认。")
 

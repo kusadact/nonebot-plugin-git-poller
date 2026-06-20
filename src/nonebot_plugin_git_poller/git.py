@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
 from datetime import datetime, timezone, timedelta
 from io import BytesIO
 from pathlib import Path
@@ -20,6 +21,12 @@ import urllib3
 from .config import Config
 from .models import CommitInfo
 from .repository import build_commit_url
+
+
+@dataclass(frozen=True)
+class RemoteHead:
+    branch: str
+    sha: str
 
 
 class GitRepositoryCache:
@@ -52,7 +59,10 @@ class GitRepositoryCache:
         return FetchedRepository(repo=repo, url=url, branch=branch, head_sha=head_sha)
 
     def peek_head(self, url: str, branch: str) -> str:
-        logger.info(f"git poller checking remote head: {url} branch={branch}")
+        return self.resolve_remote_head(url, branch).sha
+
+    def resolve_remote_head(self, url: str, branch: str | None = None) -> RemoteHead:
+        logger.info(f"git poller checking remote head: {url} branch={branch or '<default>'}")
         client, path = get_transport_and_path(
             url,
             config=self._git_config(),
@@ -60,11 +70,18 @@ class GitRepositoryCache:
             pool_manager=self._pool_manager(url),
         )
         result = client.get_refs(_encode_path(path))
-        head_sha = _resolve_remote_branch_head(result.refs, branch)
+        if branch is None:
+            remote_head = _resolve_remote_default_head(result.refs, result.symrefs)
+        else:
+            remote_head = RemoteHead(
+                branch=branch,
+                sha=_resolve_remote_branch_head(result.refs, branch),
+            )
         logger.info(
-            f"git poller remote head resolved: {url} branch={branch} sha={head_sha[:8]}"
+            f"git poller remote head resolved: {url} "
+            f"branch={remote_head.branch} sha={remote_head.sha[:8]}"
         )
-        return head_sha
+        return remote_head
 
     def remove_cache(self, repo_key: str) -> bool:
         repo_path = self.cache_dir / repo_key
@@ -260,6 +277,63 @@ def _resolve_remote_branch_head(refs: dict[bytes, bytes | None], branch: str) ->
         if value:
             return value.decode("ascii")
     raise RuntimeError(f"找不到分支：{branch}")
+
+
+def _resolve_remote_default_head(
+    refs: dict[bytes, bytes | None],
+    symrefs: dict[bytes, bytes],
+) -> RemoteHead:
+    head_ref = symrefs.get(b"HEAD")
+    if head_ref:
+        branch = _branch_name_from_ref(head_ref)
+        if branch:
+            value = refs.get(head_ref) or refs.get(b"HEAD")
+            if value:
+                return RemoteHead(branch=branch, sha=value.decode("ascii"))
+
+    head_value = refs.get(b"HEAD")
+    if head_value:
+        matches = [
+            RemoteHead(branch=branch, sha=value.decode("ascii"))
+            for branch, value in _remote_branch_refs(refs)
+            if value == head_value
+        ]
+        if matches:
+            return _choose_default_head_match(matches)
+
+    branch_refs = _remote_branch_refs(refs)
+    if len(branch_refs) == 1:
+        branch, value = branch_refs[0]
+        return RemoteHead(branch=branch, sha=value.decode("ascii"))
+
+    raise RuntimeError("无法解析远端默认分支。")
+
+
+def _remote_branch_refs(refs: dict[bytes, bytes | None]) -> list[tuple[str, bytes]]:
+    result: list[tuple[str, bytes]] = []
+    for ref, value in refs.items():
+        if not value:
+            continue
+        branch = _branch_name_from_ref(ref)
+        if branch:
+            result.append((branch, value))
+    return result
+
+
+def _branch_name_from_ref(ref: bytes) -> str | None:
+    prefix = b"refs/heads/"
+    if not ref.startswith(prefix):
+        return None
+    branch = ref[len(prefix):].decode("utf-8", errors="replace").strip()
+    return branch or None
+
+
+def _choose_default_head_match(matches: list[RemoteHead]) -> RemoteHead:
+    for preferred in ("main", "master"):
+        for match in matches:
+            if match.branch == preferred:
+                return match
+    return sorted(matches, key=lambda item: item.branch)[0]
 
 
 def _is_head_branch(branch: str) -> bool:

@@ -14,6 +14,8 @@ from .models import PollResult, RepositoryIdentity, Subscription, UpdatePayload
 from .repository import build_compare_url, build_identity, normalize_branch
 from .state import StateStore
 
+MAX_COMMITS = 20
+
 
 @dataclass(frozen=True)
 class FollowResult:
@@ -115,7 +117,7 @@ class GitPollerService:
         url: str,
         branch: str | None = None,
     ) -> tuple[RepositoryIdentity, bool]:
-        target_branch = self._target_branch(branch)
+        target_branch = self._resolve_target_branch(url, branch)
         identity = build_identity(url, target_branch)
         return identity, self.state.remove_subscription(group_id, identity.key)
 
@@ -162,7 +164,11 @@ class GitPollerService:
         return removed_cache or bool(removed_archives)
 
     def _follow_repo_sync(self, group_id: int, url: str, branch: str | None) -> FollowResult:
-        target_branch = self._target_branch(branch)
+        remote_head = self.git_cache.resolve_remote_head(
+            build_identity(url).url,
+            self._explicit_branch(branch),
+        )
+        target_branch = remote_head.branch
         identity = build_identity(url, target_branch)
         existing = self.state.get_subscription(group_id, identity.key)
         if existing is not None:
@@ -183,10 +189,7 @@ class GitPollerService:
             updated_at=now,
         )
 
-        subscription.last_success_sha = self.git_cache.peek_head(
-            identity.url,
-            subscription.branch,
-        )
+        subscription.last_success_sha = remote_head.sha
         self.state.upsert_subscription(group_id, identity.key, subscription)
         return FollowResult(
             identity=identity,
@@ -227,7 +230,7 @@ class GitPollerService:
         url: str,
         branch: str | None,
     ) -> tuple[RepositoryIdentity, Subscription]:
-        target_branch = self._target_branch(branch)
+        target_branch = self._resolve_target_branch(url, branch)
         identity = build_identity(url, target_branch)
         subscription = self.state.get_subscription(group_id, identity.key)
         if subscription is None:
@@ -324,7 +327,7 @@ class GitPollerService:
         else:
             commits = fetched.commits_since(
                 previous_sha,
-                max_count=self.config.git_poller_max_commits,
+                max_count=MAX_COMMITS,
             )
         return UpdatePayload(
             repo_key=identity.key,
@@ -369,9 +372,17 @@ class GitPollerService:
         finally:
             shutil.rmtree(source_dir.parent, ignore_errors=True)
 
-    def _target_branch(self, branch: str | None) -> str:
+    def _resolve_target_branch(self, url: str, branch: str | None) -> str:
+        explicit = self._explicit_branch(branch)
+        if explicit is not None:
+            return explicit
+        normalized_url = build_identity(url).url
+        return self.git_cache.resolve_remote_head(normalized_url).branch
+
+    @staticmethod
+    def _explicit_branch(branch: str | None) -> str | None:
         if branch is None:
-            return normalize_branch(self.config.git_poller_default_branch)
+            return None
         return normalize_branch(branch)
 
 

@@ -62,9 +62,6 @@ def _load_file_server_module(cache_dir: Path, driver: object):
 def _config(**overrides):
     values = {
         "git_poller_file_base_url": None,
-        "git_poller_file_route_prefix": "/git-poller/files",
-        "git_poller_file_token": "secret",
-        "git_poller_file_token_ttl": 3600,
     }
     values.update(overrides)
     return SimpleNamespace(**values)
@@ -96,22 +93,21 @@ def test_archive_download_url_uses_expiring_signature(tmp_path: Path, monkeypatc
     query = parse_qs(parsed.query)
     assert parsed.path == "/git-poller/files/repo%20main.7z"
     assert query["expires"] == ["4600"]
-    assert query["token"] != ["secret"]
+    assert "token" in query
     assert file_server.valid_archive_download_token(
         "repo main.7z",
         query["expires"][0],
         query["token"][0],
-        config,
     )
 
 
 def test_archive_download_url_rejects_expired_signature(tmp_path: Path, monkeypatch):
     file_server = _load_file_server_module(tmp_path / "cache", SimpleNamespace())
     config = _config(git_poller_file_base_url="http://bot.example")
-    token = file_server.archive_download_token("sample.7z", 1000, config)
+    token = file_server.archive_download_token("sample.7z", 1000)
     monkeypatch.setattr(file_server.time, "time", lambda: 1001)
 
-    assert not file_server.valid_archive_download_token("sample.7z", "1000", token, config)
+    assert not file_server.valid_archive_download_token("sample.7z", "1000", token)
 
 
 def test_archive_file_route_serves_cached_archive(tmp_path: Path, monkeypatch):
@@ -126,7 +122,7 @@ def test_archive_file_route_serves_cached_archive(tmp_path: Path, monkeypatch):
 
     assert file_server.register_archive_file_route(config) is True
     route = app.routes["/git-poller/files/{filename}"]
-    token = file_server.archive_download_token("repo-main.7z", 4600, config)
+    token = file_server.archive_download_token("repo-main.7z", 4600)
     response = asyncio.run(route("repo-main.7z", expires="4600", token=token))
 
     assert response.path == str(archive_path)

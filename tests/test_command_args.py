@@ -23,7 +23,7 @@ def test_parse_repo_command_args_accepts_branch_suffix():
 
 def test_parse_repo_command_args_allows_tail_for_settings_preview():
     parsed = command_args.parse_repo_command_args(
-        "https://example.test/repo.git --dev 每日04-30",
+        "https://example.test/repo.git --dev 每日04:30",
         allow_tail=True,
     )
 

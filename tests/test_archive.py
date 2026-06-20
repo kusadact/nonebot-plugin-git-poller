@@ -49,7 +49,7 @@ def test_archive_builder_creates_plain_7z_by_default(tmp_path: Path):
 
     result = builder.build(
         _payload(models),
-        models.Subscription(url="https://example.test/repo.git", branch="main", schedule="每日04-00"),
+        models.Subscription(url="https://example.test/repo.git", branch="main", schedule="每日04:00"),
         source,
     )
 
@@ -75,7 +75,7 @@ def test_archive_builder_uses_subscription_password(tmp_path: Path):
         models.Subscription(
             url="https://example.test/repo.git",
             branch="main",
-            schedule="每日04-00",
+            schedule="每日04:00",
             archive_password="repo-secret",
         ),
         source,
@@ -96,7 +96,7 @@ def test_archive_builder_removes_archives_for_repo_key(tmp_path: Path):
 
     result = builder.build(
         _payload(models),
-        models.Subscription(url="https://example.test/repo.git", branch="main", schedule="每日04-00"),
+        models.Subscription(url="https://example.test/repo.git", branch="main", schedule="每日04:00"),
         source,
     )
     unrelated = builder.archive_dir / "other-repo.7z"

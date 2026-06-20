@@ -109,8 +109,9 @@ class _Fetched:
 
 class _GitCache:
     def __init__(self) -> None:
-        self.calls: list[tuple[str, str, str]] = []
+        self.calls: list[tuple[str, str, str | None]] = []
         self.removed: list[str] = []
+        self.default_branch = "main"
         self.head_sha = "newsha1234567890"
         self.commits = [
             models.CommitInfo(
@@ -130,6 +131,10 @@ class _GitCache:
     def peek_head(self, url: str, branch: str):
         self.calls.append(("peek", url, branch))
         return self.head_sha
+
+    def resolve_remote_head(self, url: str, branch: str | None = None):
+        self.calls.append(("resolve", url, branch))
+        return git_module.RemoteHead(branch=branch or self.default_branch, sha=self.head_sha)
 
     def remove_cache(self, repo_key: str):
         self.removed.append(repo_key)
@@ -179,14 +184,11 @@ def _service(
 
 def _config(**overrides):
     values = {
-        "git_poller_default_schedule": "每日04-00",
+        "git_poller_default_schedule": "每日04:00",
         "git_poller_timezone": "Asia/Shanghai",
-        "git_poller_default_branch": "main",
         "git_poller_proxy": None,
         "git_poller_timeout": 60.0,
         "git_poller_archive_password": None,
-        "git_poller_command_priority": 10,
-        "git_poller_max_commits": 20,
     }
     values.update(overrides)
     return SimpleNamespace(**values)
@@ -195,14 +197,16 @@ def _config(**overrides):
 def test_follow_repo_records_head():
     state = _State()
     git_cache = _GitCache()
+    git_cache.default_branch = "master"
     service = _service(state, git_cache)
 
     result = asyncio.run(service.follow_repo(10001, "https://example.test/repo"))
 
     assert result.already_following is False
+    assert result.subscription.branch == "master"
     assert result.subscription.last_success_sha == "newsha1234567890"
     assert state.get_subscription(10001, result.identity.key).url == "https://example.test/repo.git"
-    assert git_cache.calls == [("peek", "https://example.test/repo.git", "main")]
+    assert git_cache.calls == [("resolve", "https://example.test/repo.git", None)]
 
 
 def test_follow_repo_accepts_branch_override():
@@ -214,7 +218,7 @@ def test_follow_repo_accepts_branch_override():
 
     assert result.subscription.branch == "dev"
     assert "-dev-" in result.identity.key
-    assert git_cache.calls == [("peek", "https://example.test/repo.git", "dev")]
+    assert git_cache.calls == [("resolve", "https://example.test/repo.git", "dev")]
 
 
 def test_follow_repo_detects_duplicate_in_same_group():
@@ -227,7 +231,7 @@ def test_follow_repo_detects_duplicate_in_same_group():
 
     assert first.identity.key == second.identity.key
     assert second.already_following is True
-    assert len(git_cache.calls) == 1
+    assert len(git_cache.calls) == 2
 
 
 def test_follow_repo_allows_same_url_with_different_branches():
@@ -256,7 +260,7 @@ def test_pull_repo_builds_archive_without_marking_success():
         models.Subscription(
             url=identity.url,
             branch="main",
-            schedule="每日04-00",
+            schedule="每日04:00",
             last_success_sha="oldsha123",
         ),
     )
@@ -287,7 +291,7 @@ def test_pull_repo_removes_previous_archive_before_building_new_one():
         models.Subscription(
             url=identity.url,
             branch="main",
-            schedule="每日04-00",
+            schedule="每日04:00",
             last_success_sha="oldsha123",
             last_archive_path="/tmp/old.7z",
         ),
@@ -311,7 +315,7 @@ def test_cleanup_unsubscribed_repo_skips_active_subscription():
     state.upsert_subscription(
         10001,
         identity.key,
-        models.Subscription(url=identity.url, branch="main", schedule="每日04-00"),
+        models.Subscription(url=identity.url, branch="main", schedule="每日04:00"),
     )
 
     assert service.cleanup_unsubscribed_repo(identity.key) is False
@@ -342,7 +346,7 @@ def test_summarize_repo_builds_payload_without_marking_success():
         models.Subscription(
             url=identity.url,
             branch="main",
-            schedule="每日04-00",
+            schedule="每日04:00",
             last_success_sha="oldsha123",
         ),
     )
@@ -366,7 +370,7 @@ def test_summarize_repo_reports_same_head_with_empty_commits():
         models.Subscription(
             url=identity.url,
             branch="main",
-            schedule="每日04-00",
+            schedule="每日04:00",
             last_success_sha="newsha1234567890",
         ),
     )
@@ -389,12 +393,12 @@ def test_poll_schedule_skips_unchanged_subscriptions():
         models.Subscription(
             url=identity.url,
             branch="main",
-            schedule="每日04-00",
+            schedule="每日04:00",
             last_success_sha="newsha1234567890",
         ),
     )
 
-    results = asyncio.run(service.poll_schedule("每日04-00"))
+    results = asyncio.run(service.poll_schedule("每日04:00"))
 
     assert results == []
 
@@ -411,12 +415,12 @@ def test_poll_schedule_returns_changed_subscriptions_per_group():
             models.Subscription(
                 url=identity.url,
                 branch="main",
-                schedule="每日04-00",
+                schedule="每日04:00",
                 last_success_sha=f"oldsha-{group_id}",
             ),
         )
 
-    results = asyncio.run(service.poll_schedule("每日04-00"))
+    results = asyncio.run(service.poll_schedule("每日04:00"))
 
     assert [delivery.result.group_id for delivery in results] == [10001, 10002]
     assert [delivery.result.payload.previous_sha for delivery in results] == [

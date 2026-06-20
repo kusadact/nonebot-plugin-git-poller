@@ -14,6 +14,8 @@ from .config import Config
 
 _runtime_file_token = token_urlsafe(24)
 _route_registered = False
+ARCHIVE_FILE_ROUTE_PREFIX = "/git-poller/files"
+ARCHIVE_FILE_TOKEN_TTL_SECONDS = 3600
 
 
 def register_archive_file_route(config: Config) -> bool:
@@ -35,14 +37,14 @@ def register_archive_file_route(config: Config) -> bool:
 
     from starlette.responses import FileResponse, Response
 
-    route_prefix = normalize_route_prefix(config.git_poller_file_route_prefix)
+    route_prefix = ARCHIVE_FILE_ROUTE_PREFIX
 
     async def serve_archive(
         filename: str,
         expires: str | None = None,
         token: str | None = None,
     ) -> Response:
-        if not valid_archive_download_token(filename, expires, token, config):
+        if not valid_archive_download_token(filename, expires, token):
             logger.warning(f"git poller archive download rejected for {filename}: invalid token")
             return Response(status_code=403)
         if "/" in filename or "\\" in filename:
@@ -81,27 +83,26 @@ def build_archive_download_url(path: Path, config: Config) -> str | None:
     if not config.git_poller_file_base_url:
         return None
     base_url = config.git_poller_file_base_url.rstrip("/")
-    route_prefix = normalize_route_prefix(config.git_poller_file_route_prefix)
+    route_prefix = ARCHIVE_FILE_ROUTE_PREFIX
     filename = quote(path.name)
-    expires_at = int(time.time()) + max(60, int(config.git_poller_file_token_ttl))
+    expires_at = int(time.time()) + ARCHIVE_FILE_TOKEN_TTL_SECONDS
     query = urlencode(
         {
             "expires": str(expires_at),
-            "token": archive_download_token(path.name, expires_at, config),
+            "token": archive_download_token(path.name, expires_at),
         }
     )
     return f"{base_url}{route_prefix}/{filename}?{query}"
 
 
-def archive_file_token(config: Config) -> str:
-    return (config.git_poller_file_token or "").strip() or _runtime_file_token
+def _archive_file_token() -> str:
+    return _runtime_file_token
 
 
 def valid_archive_download_token(
     filename: str,
     expires: str | None,
     token: str | None,
-    config: Config,
 ) -> bool:
     if not expires or not token:
         return False
@@ -111,16 +112,11 @@ def valid_archive_download_token(
         return False
     if expires_at < int(time.time()):
         return False
-    expected = archive_download_token(filename, expires_at, config)
+    expected = archive_download_token(filename, expires_at)
     return hmac.compare_digest(token, expected)
 
 
-def archive_download_token(filename: str, expires_at: int, config: Config) -> str:
+def archive_download_token(filename: str, expires_at: int) -> str:
     message = f"{filename}\0{expires_at}".encode("utf-8")
-    secret = archive_file_token(config).encode("utf-8")
+    secret = _archive_file_token().encode("utf-8")
     return hmac.new(secret, message, hashlib.sha256).hexdigest()
-
-
-def normalize_route_prefix(prefix: str) -> str:
-    normalized = "/" + prefix.strip("/")
-    return normalized.rstrip("/") or "/git-poller/files"
