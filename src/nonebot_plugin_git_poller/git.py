@@ -213,9 +213,14 @@ def _resolve_branch_head(
     candidates = [
         f"refs/remotes/origin/{branch}".encode("utf-8"),
         f"refs/heads/{branch}".encode("utf-8"),
-        f"refs/remotes/origin/HEAD".encode("utf-8"),
-        b"HEAD",
     ]
+    if _is_head_branch(branch):
+        candidates.extend(
+            [
+                f"refs/remotes/origin/HEAD".encode("utf-8"),
+                b"HEAD",
+            ]
+        )
     for candidate in candidates:
         value = refs.get(candidate)
         if value:
@@ -226,13 +231,18 @@ def _resolve_branch_head(
 def _resolve_remote_branch_head(refs: dict[bytes, bytes | None], branch: str) -> str:
     candidates = [
         f"refs/heads/{branch}".encode("utf-8"),
-        b"HEAD",
     ]
+    if _is_head_branch(branch):
+        candidates.append(b"HEAD")
     for candidate in candidates:
         value = refs.get(candidate)
         if value:
             return value.decode("ascii")
     raise RuntimeError(f"找不到分支：{branch}")
+
+
+def _is_head_branch(branch: str) -> bool:
+    return branch.strip().upper() == "HEAD"
 
 
 def _commit_to_info(commit: Commit, repo_url: str) -> CommitInfo:

@@ -124,6 +124,67 @@ def test_git_repository_cache_peeks_http_head_without_porcelain_ls_remote(
     assert calls["kwargs"]["pool_manager"] is not None
 
 
+def test_git_repository_cache_does_not_fallback_to_head_for_missing_branch(
+    tmp_path: Path,
+    monkeypatch,
+):
+    GitRepositoryCache = _load_git_module(tmp_path / "cache")
+    git_module = sys.modules["nonebot_plugin_git_poller.git"]
+    head_sha = "a" * 40
+
+    class FakeClient:
+        def get_refs(self, path: bytes):
+            return LsRemoteResult(
+                {
+                    b"HEAD": head_sha.encode("ascii"),
+                    b"refs/heads/main": head_sha.encode("ascii"),
+                },
+                {},
+            )
+
+    monkeypatch.setattr(
+        git_module,
+        "get_transport_and_path",
+        lambda location, **kwargs: (FakeClient(), "/owner/repo.git"),
+    )
+
+    cache = GitRepositoryCache(
+        SimpleNamespace(git_poller_proxy=None, git_poller_timeout=60.0)
+    )
+
+    try:
+        cache.peek_head("https://example.test/owner/repo.git", "dev")
+    except RuntimeError as exc:
+        assert "找不到分支：dev" in str(exc)
+    else:
+        raise AssertionError("missing branch must not fallback to remote HEAD")
+
+
+def test_git_repository_cache_allows_explicit_head_branch(
+    tmp_path: Path,
+    monkeypatch,
+):
+    GitRepositoryCache = _load_git_module(tmp_path / "cache")
+    git_module = sys.modules["nonebot_plugin_git_poller.git"]
+    head_sha = "a" * 40
+
+    class FakeClient:
+        def get_refs(self, path: bytes):
+            return LsRemoteResult({b"HEAD": head_sha.encode("ascii")}, {})
+
+    monkeypatch.setattr(
+        git_module,
+        "get_transport_and_path",
+        lambda location, **kwargs: (FakeClient(), "/owner/repo.git"),
+    )
+
+    cache = GitRepositoryCache(
+        SimpleNamespace(git_poller_proxy=None, git_poller_timeout=60.0)
+    )
+
+    assert cache.peek_head("https://example.test/owner/repo.git", "HEAD") == head_sha
+
+
 def test_export_head_tree_writes_symlink_as_plain_file(tmp_path: Path):
     source = tmp_path / "source"
     repo = porcelain.init(source)
