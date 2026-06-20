@@ -96,6 +96,10 @@ class _GitCache:
         self.calls.append((repo_key, url, branch))
         return _Fetched(url, branch, self.head_sha, self.commits)
 
+    def peek_head(self, url: str, branch: str):
+        self.calls.append(("peek", url, branch))
+        return self.head_sha
+
 
 def _config(**overrides):
     values = {
@@ -123,6 +127,7 @@ def test_follow_repo_records_head_without_first_push():
     assert result.payload is None
     assert result.subscription.last_success_sha == "newsha1234567890"
     assert state.get_subscription(10001, result.identity.key).url == "https://example.test/repo.git"
+    assert git_cache.calls == [("peek", "https://example.test/repo.git", "main")]
 
 
 def test_follow_repo_can_prepare_first_push_payload():

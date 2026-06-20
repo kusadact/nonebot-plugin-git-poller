@@ -56,6 +56,18 @@ class GitRepositoryCache:
         head_sha = _resolve_branch_head(repo, branch, remote_refs=getattr(fetch_result, "refs", None))
         return FetchedRepository(repo=repo, url=url, branch=branch, head_sha=head_sha)
 
+    def peek_head(self, url: str, branch: str) -> str:
+        logger.info(f"git poller checking remote head: {url} branch={branch}")
+        result = porcelain.ls_remote(
+            url,
+            **self._transport_kwargs(url),
+        )
+        head_sha = _resolve_remote_branch_head(result.refs, branch)
+        logger.info(
+            f"git poller remote head resolved: {url} branch={branch} sha={head_sha[:8]}"
+        )
+        return head_sha
+
     def _transport_kwargs(self, url: str) -> dict[str, Any]:
         kwargs: dict[str, Any] = {"quiet": True}
         if url.startswith(("http://", "https://")):
@@ -119,14 +131,24 @@ def _resolve_branch_head(
     remote_refs: dict[bytes, bytes | None] | None = None,
 ) -> str:
     if remote_refs:
-        remote_value = remote_refs.get(f"refs/heads/{branch}".encode("utf-8"))
-        if remote_value:
-            return remote_value.decode("ascii")
+        return _resolve_remote_branch_head(remote_refs, branch)
     refs = repo.get_refs()
     candidates = [
         f"refs/remotes/origin/{branch}".encode("utf-8"),
         f"refs/heads/{branch}".encode("utf-8"),
         f"refs/remotes/origin/HEAD".encode("utf-8"),
+        b"HEAD",
+    ]
+    for candidate in candidates:
+        value = refs.get(candidate)
+        if value:
+            return value.decode("ascii")
+    raise RuntimeError(f"找不到分支：{branch}")
+
+
+def _resolve_remote_branch_head(refs: dict[bytes, bytes | None], branch: str) -> str:
+    candidates = [
+        f"refs/heads/{branch}".encode("utf-8"),
         b"HEAD",
     ]
     for candidate in candidates:

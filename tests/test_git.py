@@ -63,3 +63,17 @@ def test_git_repository_cache_fetches_local_repo_updates(tmp_path: Path):
         assert [commit.title for commit in commits] == ["Second commit"]
     finally:
         fetched.close()
+
+
+def test_git_repository_cache_peeks_remote_head_without_clone(tmp_path: Path):
+    source = tmp_path / "source"
+    porcelain.init(source)
+    head_sha = _commit(source, "README.md", "one", "Initial commit")
+
+    GitRepositoryCache = _load_git_module(tmp_path / "cache")
+    cache = GitRepositoryCache(
+        SimpleNamespace(git_poller_proxy=None, git_poller_timeout=60.0)
+    )
+
+    assert cache.peek_head(str(source), "master") == head_sha
+    assert not (tmp_path / "cache" / "repos" / "repo").exists()

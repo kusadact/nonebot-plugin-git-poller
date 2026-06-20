@@ -79,32 +79,33 @@ class GitPollerService:
                 already_following=True,
             )
 
-        fetched = self.git_cache.fetch(
-            identity.key,
-            identity.url,
-            self.config.git_poller_default_branch,
+        now = _now_iso()
+        subscription = Subscription(
+            url=identity.url,
+            branch=self.config.git_poller_default_branch,
+            schedule=self.config.git_poller_default_schedule,
+            last_success_sha=None,
+            enabled=True,
+            created_at=now,
+            updated_at=now,
         )
-        try:
-            now = _now_iso()
-            subscription = Subscription(
-                url=identity.url,
-                branch=self.config.git_poller_default_branch,
-                schedule=self.config.git_poller_default_schedule,
-                last_success_sha=(
-                    None
-                    if self.config.git_poller_push_on_first_follow
-                    else fetched.head_sha
-                ),
-                enabled=True,
-                created_at=now,
-                updated_at=now,
+
+        if not self.config.git_poller_push_on_first_follow:
+            subscription.last_success_sha = self.git_cache.peek_head(
+                identity.url,
+                subscription.branch,
             )
             self.state.upsert_subscription(group_id, identity.key, subscription)
-            payload = (
-                self._build_payload(identity, subscription, fetched, None)
-                if self.config.git_poller_push_on_first_follow
-                else None
+            return FollowResult(
+                identity=identity,
+                subscription=subscription,
+                already_following=False,
             )
+
+        fetched = self.git_cache.fetch(identity.key, identity.url, subscription.branch)
+        try:
+            self.state.upsert_subscription(group_id, identity.key, subscription)
+            payload = self._build_payload(identity, subscription, fetched, None)
             return FollowResult(
                 identity=identity,
                 subscription=subscription,
