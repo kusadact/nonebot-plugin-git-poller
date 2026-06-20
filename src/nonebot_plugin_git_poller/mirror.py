@@ -28,6 +28,7 @@ class PullResult:
     subscription: Subscription
     previous_sha: str | None
     target_sha: str
+    payload: UpdatePayload
     archive: ArchiveFile
 
 
@@ -193,6 +194,7 @@ class GitPollerService:
                 subscription=subscription,
                 previous_sha=previous_sha,
                 target_sha=fetched.head_sha,
+                payload=payload,
                 archive=archive,
             )
         finally:

@@ -51,6 +51,8 @@ def test_archive_builder_creates_plain_7z_by_default(tmp_path: Path):
 
     assert result.path.exists()
     assert result.name == "repo-main-abcdef12.7z"
+    assert len(result.sha256) == 64
+    assert result.password is None
     assert result.password_used is False
     with py7zr.SevenZipFile(result.path, "r") as compressed:
         assert "source/README.md" in compressed.getnames()
@@ -75,5 +77,6 @@ def test_archive_builder_uses_subscription_password(tmp_path: Path):
     )
 
     assert result.password_used is True
+    assert result.password == "repo-secret"
     with py7zr.SevenZipFile(result.path, "r", password="repo-secret") as compressed:
         assert "source/README.md" in compressed.getnames()

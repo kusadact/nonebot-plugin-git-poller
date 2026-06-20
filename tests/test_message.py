@@ -77,6 +77,14 @@ def _payload():
         compare_url="https://github.com/example/repo/compare/oldsha123...newsha123",
         commits=[
             models.CommitInfo(
+                sha="midsha123",
+                short_sha="midsha12",
+                title="Prepare feature",
+                committed_at="2026-06-20T03:50:00+08:00",
+                author="Bob",
+                url="https://github.com/example/repo/commit/midsha123",
+            ),
+            models.CommitInfo(
                 sha="newsha123",
                 short_sha="newsha12",
                 title="Add feature",
@@ -102,14 +110,13 @@ def _config(**overrides):
 def test_build_forward_nodes_contains_summary_and_commits():
     nodes = message.build_forward_nodes(_payload())
 
-    assert len(nodes) == 2
+    assert len(nodes) == 3
     summary = nodes[0][1]["content"]
-    commit = nodes[1][1]["content"]
     assert "仓库更新：repo" in summary
-    assert "新增 commit：1" in summary
+    assert "新增 commit：2" in summary
     assert "oldsha12" in summary
-    assert "Add feature" in commit
-    assert "Alice" in commit
+    assert any("Add feature" in node[1]["content"] for node in nodes)
+    assert any("Alice" in node[1]["content"] for node in nodes)
 
 
 def test_send_update_to_group_uses_forward_message_only():
@@ -119,12 +126,18 @@ def test_send_update_to_group_uses_forward_message_only():
 
     assert bot.calls[0][0] == "send_group_forward_msg"
     assert bot.calls[0][1]["group_id"] == 10001
-    assert len(bot.calls[0][1]["messages"]) == 2
+    assert len(bot.calls[0][1]["messages"]) == 3
 
 
 def test_upload_archive_to_group_uses_group_file_api():
     bot = _Bot()
-    archive = SimpleNamespace(path=Path("/tmp/repo.7z"), name="repo.7z", password_used=False)
+    archive = SimpleNamespace(
+        path=Path("/tmp/repo.7z"),
+        name="repo.7z",
+        sha256="0" * 64,
+        password=None,
+        password_used=False,
+    )
 
     asyncio.run(message.upload_archive_to_group(bot, 10001, archive, config=_config()))
 
@@ -139,6 +152,8 @@ def test_upload_archive_to_group_uses_file_base_url():
     archive = SimpleNamespace(
         path=Path("/tmp/repo main.7z"),
         name="repo-main.7z",
+        sha256="0" * 64,
+        password=None,
         password_used=False,
     )
 
@@ -162,6 +177,24 @@ def test_upload_archive_to_group_uses_file_base_url():
     assert bot.calls[0][1]["name"] == "repo-main.7z"
 
 
+def test_build_archive_delivery_text_lists_commits_with_latest_last():
+    archive = SimpleNamespace(
+        sha256="f" * 64,
+        password="secret",
+    )
+
+    text = message.build_archive_delivery_text(_payload(), archive, title="拉取完成")
+
+    assert text.splitlines() == [
+        "拉取完成：repo",
+        "分支：main",
+        f"sha256：{'f' * 64}",
+        "密码：secret",
+        "midsha12：Prepare feature",
+        "最新newsha12：Add feature",
+    ]
+
+
 def test_upload_archive_to_group_reports_file_base_url_for_unrecognized_uri():
     bot = _Bot(
         upload_error=_ActionFailed(
@@ -169,7 +202,13 @@ def test_upload_archive_to_group_reports_file_base_url_for_unrecognized_uri():
             wording="识别URL失败, uri= /workspace/cache/repo.7z",
         )
     )
-    archive = SimpleNamespace(path=Path("/tmp/repo.7z"), name="repo.7z", password_used=False)
+    archive = SimpleNamespace(
+        path=Path("/tmp/repo.7z"),
+        name="repo.7z",
+        sha256="0" * 64,
+        password=None,
+        password_used=False,
+    )
 
     try:
         asyncio.run(message.upload_archive_to_group(bot, 10001, archive, config=_config()))
@@ -183,7 +222,13 @@ def test_upload_archive_to_group_reports_file_base_url_for_unrecognized_uri():
 def test_upload_archive_to_group_keeps_other_action_failed_errors_scoped():
     original = _ActionFailed(message="上传失败")
     bot = _Bot(upload_error=original)
-    archive = SimpleNamespace(path=Path("/tmp/repo.7z"), name="repo.7z", password_used=False)
+    archive = SimpleNamespace(
+        path=Path("/tmp/repo.7z"),
+        name="repo.7z",
+        sha256="0" * 64,
+        password=None,
+        password_used=False,
+    )
 
     try:
         asyncio.run(message.upload_archive_to_group(bot, 10001, archive, config=_config()))

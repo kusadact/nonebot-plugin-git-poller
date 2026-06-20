@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import hashlib
 from pathlib import Path
 import re
 import tempfile
@@ -16,6 +17,8 @@ from .models import Subscription, UpdatePayload
 class ArchiveFile:
     path: Path
     name: str
+    sha256: str
+    password: str | None
     password_used: bool
 
 
@@ -44,6 +47,8 @@ class ArchiveBuilder:
         return ArchiveFile(
             path=archive_path,
             name=archive_name,
+            sha256=_sha256_file(archive_path),
+            password=password,
             password_used=password is not None,
         )
 
@@ -83,3 +88,11 @@ def _clean_password(value: str | None) -> str | None:
         return None
     cleaned = value.strip()
     return cleaned or None
+
+
+def _sha256_file(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as file:
+        for chunk in iter(lambda: file.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()

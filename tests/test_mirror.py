@@ -127,6 +127,8 @@ class _ArchiveBuilder:
         return SimpleNamespace(
             path=Path("/tmp/archive.7z"),
             name=f"{payload.repo_name}.7z",
+            sha256="0" * 64,
+            password=subscription.archive_password,
             password_used=subscription.archive_password is not None,
         )
 

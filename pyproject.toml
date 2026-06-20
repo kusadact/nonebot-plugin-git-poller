@@ -1,6 +1,6 @@
 [project]
 name = "nonebot-plugin-git-poller"
-version = "0.1.1"
+version = "0.1.2"
 description = "Poll Git repository updates per OneBot group"
 authors = [
     {name = "kusadact"},

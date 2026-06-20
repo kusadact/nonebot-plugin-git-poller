@@ -26,6 +26,23 @@ def build_forward_nodes(payload: UpdatePayload) -> list[MessageSegment]:
     return nodes
 
 
+def build_archive_delivery_text(payload: UpdatePayload, archive, *, title: str) -> str:
+    lines = [
+        f"{title}：{payload.repo_name}",
+        f"分支：{payload.branch}",
+        f"sha256：{archive.sha256}",
+        f"密码：{archive.password or '无'}",
+    ]
+    if not payload.commits:
+        lines.append("无新增 commit")
+        return "\n".join(lines)
+
+    for index, commit in enumerate(payload.commits):
+        prefix = f"最新{commit.short_sha}" if index == len(payload.commits) - 1 else commit.short_sha
+        lines.append(f"{prefix}：{commit.title}")
+    return "\n".join(lines)
+
+
 async def send_update_to_group(bot: Bot, group_id: int, payload: UpdatePayload) -> None:
     nodes = build_forward_nodes(payload)
     logger.info(

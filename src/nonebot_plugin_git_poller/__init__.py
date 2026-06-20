@@ -15,7 +15,12 @@ from nonebot_plugin_apscheduler import scheduler
 from .command_args import parse_repo_command_args
 from .config import Config, plugin_config
 from .file_server import register_archive_file_route
-from .message import ArchiveUploadUriError, send_update_to_group, upload_archive_to_group
+from .message import (
+    ArchiveUploadUriError,
+    build_archive_delivery_text,
+    send_update_to_group,
+    upload_archive_to_group,
+)
 from .mirror import GitPollerService
 from .schedule import parse_schedule
 
@@ -269,15 +274,12 @@ async def _(bot: Bot, event: GroupMessageEvent, matcher: Matcher, args: Message 
             config=plugin_config,
         )
         service.mark_pull_success(group_id, result.identity.key, result.target_sha)
-        previous = result.previous_sha[:8] if result.previous_sha else "未记录"
-        target = result.target_sha[:8]
-        status = "本地与远程相同" if result.previous_sha == result.target_sha else "已更新本地记录"
         await matcher.finish(
-            f"拉取完成：{result.identity.display_name}\n"
-            f"分支：{result.subscription.branch}\n"
-            f"原记录：{previous}\n"
-            f"当前：{target}\n"
-            f"{status}"
+            build_archive_delivery_text(
+                result.payload,
+                result.archive,
+                title="拉取完成",
+            )
         )
     except FinishedException:
         raise
@@ -333,12 +335,19 @@ async def run_scheduled_check(schedule: str) -> None:
         results = await service.poll_schedule(schedule)
         for result in results:
             try:
-                await send_update_to_group(bot, result.result.group_id, result.result.payload)
                 await upload_archive_to_group(
                     bot,
                     result.result.group_id,
                     result.archive,
                     config=plugin_config,
+                )
+                await bot.send_group_msg(
+                    group_id=int(result.result.group_id),
+                    message=build_archive_delivery_text(
+                        result.result.payload,
+                        result.archive,
+                        title="拉取完成",
+                    ),
                 )
             except ArchiveUploadUriError as exc:
                 logger.exception(
