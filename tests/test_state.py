@@ -7,32 +7,12 @@ import types
 from types import SimpleNamespace
 
 
-class _FakePayload:
-    received: dict[str, object] | None = None
-
-    @classmethod
-    def from_json(cls, data: dict[str, object]):
-        cls.received = data
-        return cls
-
-
 def _load_state_module(data_dir: Path):
-    path = (
-        Path(__file__).resolve().parents[1]
-        / "src"
-        / "nonebot_plugin_eratw_mirror"
-        / "state.py"
-    )
-    spec = importlib.util.spec_from_file_location(
-        "nonebot_plugin_eratw_mirror.state",
-        path,
-    )
-    assert spec is not None
-    module = importlib.util.module_from_spec(spec)
-    package = types.ModuleType("nonebot_plugin_eratw_mirror")
-    package.__path__ = [str(path.parent)]
+    package_dir = Path(__file__).resolve().parents[1] / "src" / "nonebot_plugin_git_poller"
+    package = types.ModuleType("nonebot_plugin_git_poller")
+    package.__path__ = [str(package_dir)]
     package.__spec__ = importlib.util.spec_from_loader(
-        "nonebot_plugin_eratw_mirror",
+        "nonebot_plugin_git_poller",
         loader=None,
         is_package=True,
     )
@@ -44,59 +24,96 @@ def _load_state_module(data_dir: Path):
     )
     localstore_module = types.ModuleType("nonebot_plugin_localstore")
     localstore_module.get_plugin_data_dir = lambda: data_dir
-    models_module = types.ModuleType("nonebot_plugin_eratw_mirror.models")
-    models_module.UpdatePayload = _FakePayload
-    sys.modules["nonebot_plugin_eratw_mirror"] = package
-    sys.modules["nonebot_plugin_eratw_mirror.models"] = models_module
+
+    sys.modules["nonebot_plugin_git_poller"] = package
     sys.modules["nonebot"] = nonebot_module
     sys.modules["nonebot_plugin_localstore"] = localstore_module
-    sys.modules[spec.name] = module
-    assert spec.loader is not None
-    spec.loader.exec_module(module)
-    return module
+
+    for name in ("models", "state"):
+        module_name = f"nonebot_plugin_git_poller.{name}"
+        spec = importlib.util.spec_from_file_location(module_name, package_dir / f"{name}.py")
+        assert spec is not None
+        module = importlib.util.module_from_spec(spec)
+        sys.modules[module_name] = module
+        assert spec.loader is not None
+        spec.loader.exec_module(module)
+    return sys.modules["nonebot_plugin_git_poller.state"], sys.modules["nonebot_plugin_git_poller.models"]
 
 
-def test_group_upload_state_is_independent_from_push_success(tmp_path: Path):
-    state = _load_state_module(tmp_path)
+def test_subscriptions_are_group_and_repo_scoped(tmp_path: Path):
+    state, models = _load_state_module(tmp_path)
     store = state.StateStore()
 
-    store.add_uploaded_group("abc123", "sha-a", 10001)
+    store.upsert_subscription(
+        10001,
+        "repo-a",
+        models.Subscription(url="https://example.test/a.git", branch="main", schedule="每日04-00"),
+    )
+    store.upsert_subscription(
+        10001,
+        "repo-b",
+        models.Subscription(url="https://example.test/b.git", branch="dev", schedule="星期一04-30"),
+    )
+    store.upsert_subscription(
+        10002,
+        "repo-a",
+        models.Subscription(url="https://example.test/a.git", branch="main", schedule="每日04-00"),
+    )
 
-    assert store.read_uploaded_groups("abc123", "sha-a") == {10001}
-    assert store.read_uploaded_groups("abc123", "sha-b") == set()
-    assert store.read_successful_groups("abc123") == set()
+    group_one = store.list_group_subscriptions(10001)
+    group_two = store.list_group_subscriptions(10002)
 
-    store.add_successful_group("abc123", 10001)
-
-    assert store.read_uploaded_groups("abc123", "sha-a") == {10001}
-    assert store.read_successful_groups("abc123") == {10001}
+    assert sorted(group_one) == ["repo-a", "repo-b"]
+    assert sorted(group_two) == ["repo-a"]
+    assert group_one["repo-b"].branch == "dev"
 
 
-def test_group_upload_state_is_cleared_after_final_success(tmp_path: Path):
-    state = _load_state_module(tmp_path)
+def test_update_last_success_only_changes_target_subscription(tmp_path: Path):
+    state, models = _load_state_module(tmp_path)
     store = state.StateStore()
+    store.upsert_subscription(
+        10001,
+        "repo-a",
+        models.Subscription(url="https://example.test/a.git", branch="main", schedule="每日04-00"),
+    )
+    store.upsert_subscription(
+        10001,
+        "repo-b",
+        models.Subscription(url="https://example.test/b.git", branch="main", schedule="每日04-00"),
+    )
 
-    store.add_uploaded_group("abc123", "sha-a", 10001)
-    store.add_successful_group("abc123", 10001)
-    store.set_last_success("abc123", "2026-06-10T04:00:00+08:00")
+    store.update_last_success(10001, "repo-a", "abc123", "2026-06-20T04:00:00+08:00")
 
-    assert store.read_uploaded_groups("abc123", "sha-a") == set()
-    assert store.read_successful_groups("abc123") == set()
+    assert store.get_subscription(10001, "repo-a").last_success_sha == "abc123"
+    assert store.get_subscription(10001, "repo-b").last_success_sha is None
 
 
-def test_cached_payload_is_not_rejected_by_expired_worker_url(tmp_path: Path):
-    state = _load_state_module(tmp_path)
+def test_subscriptions_for_schedule_filters_enabled_entries(tmp_path: Path):
+    state, models = _load_state_module(tmp_path)
     store = state.StateStore()
-    payload_data = {
-        "target_sha": "abc123",
-        "archive": {
-            "download_url": "http://worker.example/archive.7z?expires=1&token=old",
-            "download_expires_at": 1,
-        },
-    }
-    store.payload_path.write_text(state.json.dumps(payload_data), encoding="utf-8")
+    store.upsert_subscription(
+        10001,
+        "repo-a",
+        models.Subscription(url="https://example.test/a.git", branch="main", schedule="每日04-00"),
+    )
+    store.upsert_subscription(
+        10001,
+        "repo-b",
+        models.Subscription(
+            url="https://example.test/b.git",
+            branch="main",
+            schedule="每日04-00",
+            enabled=False,
+        ),
+    )
+    store.upsert_subscription(
+        10002,
+        "repo-c",
+        models.Subscription(url="https://example.test/c.git", branch="main", schedule="星期10430"),
+    )
 
-    payload = store.read_last_payload()
+    matches = store.subscriptions_for_schedule("每日04-00")
 
-    assert payload is _FakePayload
-    assert _FakePayload.received == payload_data
+    assert [(group_id, repo_key) for group_id, repo_key, _ in matches] == [
+        (10001, "repo-a")
+    ]

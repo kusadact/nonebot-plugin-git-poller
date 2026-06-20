@@ -3,111 +3,117 @@
     <img src="https://raw.githubusercontent.com/fllesser/nonebot-plugin-template/refs/heads/resource/.docs/NoneBotPlugin.svg" width="310" alt="logo">
   </a>
 
-## ✨ nonebot-plugin-eratw-mirror ✨
+## nonebot-plugin-git-poller
 
 </div>
 
-GitGud eraTW 魔改仓库更新搬运插件。
+按群订阅 Git 仓库更新的 NoneBot2 插件。每个群可以独立关注多个仓库，插件定时拉取远端仓库并推送 commit 更新摘要。
 
-插件会按定时计划检查 GitGud 项目 `era-games-zh/touhou/eratw-sub-modding` 的主仓库：
-
-1. 比较当前 commit 和本地保存的 `last_success_sha`。
-2. 用 GitLab compare API 补齐两次推送间隔内的所有 commit。
-3. 请求远端 worker 维护 Git 缓存、fetch 最新 commit，并导出源码。
-4. worker 使用 py7zr 重新打包为仅存储、带密码、隐藏文件列表的 7z。
-5. 提取 `魔改版更新记录文档/补丁&readme集/ADD_BANQUET_开发日志.md` 在本次更新中的新增内容。
-6. 将 worker 下载地址交给 OneBot/NapCat 上传群文件，并发送合并转发消息。
+第一版只推送 commit 摘要，不包含源码压缩包、远端 worker、密码 7z 或特定项目 changelog 提取逻辑。
 
 ## 安装
 
 在 NoneBot 项目目录中安装插件：
 
 ```bash
-uv add git+https://github.com/kusadact/nonebot-plugin-eratw-mirror.git --branch feat/pack-worker
-```
-
-在 worker 服务器拉取 worker 脚本：
-
-```bash
-git clone -b feat/pack-worker https://github.com/kusadact/nonebot-plugin-eratw-mirror.git /opt/eratw-worker/repo
+uv add git+https://github.com/kusadact/nonebot-plugin-git-poller.git
 ```
 
 在 `pyproject.toml` 中加载插件：
 
 ```toml
 [tool.nonebot]
-plugins = ["nonebot_plugin_eratw_mirror"]
+plugins = ["nonebot_plugin_git_poller"]
 ```
+
+插件使用 Python 依赖 `dulwich` 拉取 Git 仓库，不要求系统额外安装 `git` 命令。
 
 ## 配置
 
-在 NoneBot `.env` 中配置：
+只保留全局默认值，仓库 URL 不再写入 `.env`。群和仓库订阅通过命令维护。
 
-| 配置项 | 必填 | 默认值 | 说明 |
-| --- | --- | --- | --- |
-| `eratw_group_ids` | 否 | `[]` | 自动推送群白名单；为空时不会自动推送。 |
-| `eratw_schedule` | 否 | `daily@04:00` | 定时检查规则；留空关闭自动推送。支持 `daily@HH:MM`、`weekly@mon,thu@HH:MM`、`interval_days@2@HH:MM`。 |
-| `eratw_schedule_timezone` | 否 | `Asia/Shanghai` | 定时任务时区。 |
-| `eratw_proxy` | 否 | 空 | Bot 端访问 GitGud API 使用的代理。 |
-| `eratw_worker_proxy` | 否 | 未设置 | worker 服务器执行 Git 拉取时使用的代理。 |
-| `eratw_archive_password` | 否 | `eratoho` | 生成 7z 压缩包时使用的密码。 |
-| `eratw_timeout` | 否 | `3600` | 超时时间，单位秒；用于请求远端 worker 和群文件上传 API 等长耗时操作。 |
-| `API_TIMEOUT` | 建议 | `3600` | NoneBot/适配器全局 API 超时，不是本插件配置项；建议填写并与 `eratw_timeout` 保持一致，不填写时大文件上传容易被默认超时提前中断。 |
-| `eratw_worker_base_url` | 是 | 空 | 远端 worker 地址，例如 `http://worker.example:18721`。 |
-| `eratw_worker_token` | 是 | 空 | 远端 worker 鉴权 token；必须和 worker 的 `ERATW_WORKER_TOKEN` 一致。 |
+| 配置项 | 默认值 | 说明 |
+| --- | --- | --- |
+| `git_poller_default_schedule` | `每日04-00` | 新关注仓库的默认定时规则；留空可关闭默认定时注册。 |
+| `git_poller_timezone` | `Asia/Shanghai` | 定时任务时区。 |
+| `git_poller_default_branch` | `main` | 新关注仓库的默认分支。 |
+| `git_poller_push_on_first_follow` | `false` | 首次关注时是否推送当前 head。为 `false` 时只记录当前 commit，后续有更新才推送。 |
+| `git_poller_proxy` | 空 | HTTP/HTTPS Git 拉取代理。 |
+| `git_poller_timeout` | `60.0` | HTTP/HTTPS Git 拉取超时，单位秒。 |
+| `git_poller_command_priority` | `10` | 命令优先级。 |
+| `git_poller_max_commits` | `20` | 单次最多展示 commit 数。 |
 
-`example.env`:
+示例：
 
 ```dotenv
-eratw_group_ids=[123456789, 987654321]
-eratw_schedule="daily@04:00"
-eratw_proxy="http://bot-proxy.example:7890"
-eratw_worker_proxy="http://worker-proxy.example:7890"
-eratw_archive_password="eratoho"
-eratw_timeout=3600
-API_TIMEOUT=3600
-eratw_worker_base_url="http://worker.example:18721"
-eratw_worker_token="change-me"
+git_poller_default_schedule="每日04-00"
+git_poller_timezone="Asia/Shanghai"
+git_poller_default_branch="main"
+git_poller_push_on_first_follow=false
+git_poller_proxy="http://127.0.0.1:7890"
+git_poller_timeout=60
+git_poller_command_priority=10
+git_poller_max_commits=20
 ```
 
 ## 指令
 
 ```text
-/eratw测试推送
-/拉取最新版
+/关注仓库 仓库url
+/取关仓库 仓库url
+/设置仓库 仓库url
+/仓库列表
+/拉取仓库 仓库url
 ```
 
-仅限 SuperUser。
+`/关注仓库 仓库url` 在当前群关注仓库。插件会按 URL 规范化生成稳定 `repo_key`，同一个群重复关注同一仓库不会新增第二条订阅。
 
-`/eratw测试推送` 每次都会拉取当前分支最新 commit，生成压缩包，并发送测试合并转发消息。若 worker 已缓存该 commit 的归档，会直接复用缓存归档；测试命令不会更新 `last_success_sha`。
+`/取关仓库 仓库url` 只移除当前群的对应仓库订阅，不影响其他群。
 
-`/拉取最新版` 仅在群聊中使用，只向发送命令的群推送当前分支最新 commit。推送成功后会更新 `last_success_sha`；如果发送失败，则不会更新。
+`/设置仓库 仓库url` 第一阶段只回复后续格式示例，不会修改状态。
 
-## Worker
+`/仓库列表` 显示当前群关注的仓库、分支、定时、启用状态和 `last_success_sha`。
 
-运行示例：
+`/拉取仓库 仓库url` 立即拉取当前群已关注的仓库并推送摘要；发送成功后才更新本群本仓库的 `last_success_sha`。
 
-```bash
-cd /opt/eratw-worker/repo
-python3.11 -m venv /opt/eratw-worker/venv
-/opt/eratw-worker/venv/bin/pip install dulwich==1.2.6 py7zr==1.1.0
+## 定时格式
 
-export ERATW_WORKER_HOST=0.0.0.0
-export ERATW_WORKER_PORT=18721
-export ERATW_WORKER_PUBLIC_BASE_URL="http://worker.example:18721"
-export ERATW_WORKER_TOKEN="change-me"
-export ERATW_WORKER_DATA_DIR=/opt/eratw-worker/data
-export ERATW_WORKER_CACHE_DIR=/opt/eratw-worker/cache
+支持：
 
-/opt/eratw-worker/venv/bin/python worker/eratw_worker.py
+```text
+每日HH-MM
+星期xHH-MM
+星期xHHMM
 ```
 
-## 部署注意
+`星期x` 兼容 `1-7` 和 `一二三四五六日/天`，其中 `1/一` 为星期一，`7/日/天` 为星期日。
 
-大文件上传时，OneBot API 调用会长时间不返回。插件默认用 `eratw_timeout=3600` 等待 Git 操作和 `upload_group_file`；同时建议在 `.env` 里填写 `API_TIMEOUT=3600`，否则 NoneBot 或适配器的全局 API 超时可能先断开，导致上传失败。
+`每周HH-MM` 因缺少星期几，第一版不作为正式格式。
 
-## 使用
+## 状态
 
-<img src="./.docs/usage-push.jpeg" width="420" alt="测试推送与群文件上传">
+状态保存在 localstore 插件数据目录下的 `state.json`，结构按群和仓库独立保存：
 
-<img src="./.docs/usage-forward.png" width="420" alt="合并转发消息内容">
+```json
+{
+  "groups": {
+    "123456789": {
+      "repos": {
+        "repo-xxxxxxxxxxxx": {
+          "url": "https://github.com/example/repo.git",
+          "branch": "main",
+          "schedule": "每日04-00",
+          "last_success_sha": "abcdef...",
+          "enabled": true
+        }
+      }
+    }
+  }
+}
+```
+
+## Git 支持
+
+插件维护本地 bare cache，并通过 `dulwich` clone/fetch 远端仓库。HTTP/HTTPS URL、SSH scp-like URL、本地路径等由 `dulwich` 支持范围决定。
+
+GitHub 使用 `/commit`、`/compare` 链接；GitLab/GitGud 使用 `/-/commit`、`/-/compare` 链接；其他通用 HTTP Git URL 会尽量生成 commit/compare 链接。
