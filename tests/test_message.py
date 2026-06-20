@@ -23,6 +23,21 @@ v11_module = types.ModuleType("nonebot.adapters.onebot.v11")
 v11_module.Bot = object
 v11_module.Message = str
 v11_module.MessageSegment = SimpleNamespace(node_custom=lambda **kwargs: ("node", kwargs))
+
+
+class _ActionFailed(Exception):
+    def __init__(self, **kwargs):
+        self.info = kwargs
+
+    def __repr__(self):
+        return (
+            "ActionFailed("
+            + ", ".join(f"{key}={value!r}" for key, value in self.info.items())
+            + ")"
+        )
+
+
+v11_module.ActionFailed = _ActionFailed
 localstore_module = types.ModuleType("nonebot_plugin_localstore")
 localstore_module.get_plugin_cache_dir = lambda: Path("/tmp/cache")
 sys.modules["nonebot"] = nonebot_module
@@ -36,13 +51,16 @@ message = load_plugin_module("message")
 
 
 class _Bot:
-    def __init__(self) -> None:
+    def __init__(self, upload_error: Exception | None = None) -> None:
         self.calls: list[tuple[str, dict[str, object]]] = []
+        self.upload_error = upload_error
 
     async def send_group_forward_msg(self, **kwargs: object) -> None:
         self.calls.append(("send_group_forward_msg", kwargs))
 
     async def upload_group_file(self, **kwargs: object) -> None:
+        if self.upload_error is not None:
+            raise self.upload_error
         self.calls.append(("upload_group_file", kwargs))
 
 
@@ -142,3 +160,34 @@ def test_upload_archive_to_group_uses_file_base_url():
     assert "expires" in query
     assert "token" in query
     assert bot.calls[0][1]["name"] == "repo-main.7z"
+
+
+def test_upload_archive_to_group_reports_file_base_url_for_unrecognized_uri():
+    bot = _Bot(
+        upload_error=_ActionFailed(
+            message="识别URL失败, uri= /workspace/cache/repo.7z",
+            wording="识别URL失败, uri= /workspace/cache/repo.7z",
+        )
+    )
+    archive = SimpleNamespace(path=Path("/tmp/repo.7z"), name="repo.7z", password_used=False)
+
+    try:
+        asyncio.run(message.upload_archive_to_group(bot, 10001, archive, config=_config()))
+    except message.ArchiveUploadUriError as exc:
+        assert str(exc) == message.ARCHIVE_UPLOAD_URI_ERROR_MESSAGE
+        assert "git_poller_file_base_url" in str(exc)
+    else:
+        raise AssertionError("upload should report file base URL guidance")
+
+
+def test_upload_archive_to_group_keeps_other_action_failed_errors_scoped():
+    original = _ActionFailed(message="上传失败")
+    bot = _Bot(upload_error=original)
+    archive = SimpleNamespace(path=Path("/tmp/repo.7z"), name="repo.7z", password_used=False)
+
+    try:
+        asyncio.run(message.upload_archive_to_group(bot, 10001, archive, config=_config()))
+    except _ActionFailed as exc:
+        assert exc is original
+    else:
+        raise AssertionError("unrelated ActionFailed should not be converted")

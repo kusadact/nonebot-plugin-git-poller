@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from nonebot import logger
-from nonebot.adapters.onebot.v11 import Bot, Message, MessageSegment
+from nonebot.adapters.onebot.v11 import ActionFailed, Bot, Message, MessageSegment
 
 from .config import Config
 from .file_server import build_archive_download_url
@@ -9,6 +9,14 @@ from .models import UpdatePayload
 
 
 DEFAULT_NODE_USER_ID = 2854196310
+ARCHIVE_UPLOAD_URI_ERROR_MESSAGE = (
+    "上传压缩包失败：OneBot 无法识别文件地址，"
+    "请检查 git_poller_file_base_url 是否正确。"
+)
+
+
+class ArchiveUploadUriError(RuntimeError):
+    pass
 
 
 def build_forward_nodes(payload: UpdatePayload) -> list[MessageSegment]:
@@ -51,11 +59,16 @@ async def upload_archive_to_group(
         f"git poller uploading archive to group {group_id}: "
         f"name={archive.name}, password={archive.password_used}, file={upload_file}"
     )
-    await bot.upload_group_file(
-        group_id=int(group_id),
-        file=upload_file,
-        name=archive.name,
-    )
+    try:
+        await bot.upload_group_file(
+            group_id=int(group_id),
+            file=upload_file,
+            name=archive.name,
+        )
+    except ActionFailed as exc:
+        if _is_unrecognized_upload_uri(exc):
+            raise ArchiveUploadUriError(ARCHIVE_UPLOAD_URI_ERROR_MESSAGE) from exc
+        raise
     logger.info(f"git poller archive uploaded to group {group_id}: {archive.name}")
 
 
@@ -115,3 +128,13 @@ def _node(content: str, nickname: str) -> MessageSegment:
         nickname=nickname or "Git 更新",
         content=Message(content),
     )
+
+
+def _is_unrecognized_upload_uri(exc: ActionFailed) -> bool:
+    info = getattr(exc, "info", {})
+    fields = []
+    if isinstance(info, dict):
+        fields.extend(str(info.get(key, "")) for key in ("message", "wording", "msg"))
+    fields.append(repr(exc))
+    text = "\n".join(fields)
+    return "识别URL失败" in text and "uri=" in text

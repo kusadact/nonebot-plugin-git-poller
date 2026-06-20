@@ -15,7 +15,7 @@ from nonebot_plugin_apscheduler import scheduler
 from .command_args import parse_repo_command_args
 from .config import Config, plugin_config
 from .file_server import register_archive_file_route
-from .message import send_update_to_group, upload_archive_to_group
+from .message import ArchiveUploadUriError, send_update_to_group, upload_archive_to_group
 from .mirror import GitPollerService
 from .schedule import parse_schedule
 
@@ -340,6 +340,22 @@ async def run_scheduled_check(schedule: str) -> None:
                     result.archive,
                     config=plugin_config,
                 )
+            except ArchiveUploadUriError as exc:
+                logger.exception(
+                    f"git poller scheduled archive upload URI failed: "
+                    f"group={result.result.group_id}, repo={result.result.repo_key}"
+                )
+                try:
+                    await bot.send_group_msg(
+                        group_id=int(result.result.group_id),
+                        message=str(exc),
+                    )
+                except Exception:
+                    logger.exception(
+                        f"git poller scheduled upload error notification failed: "
+                        f"group={result.result.group_id}, repo={result.result.repo_key}"
+                    )
+                continue
             except Exception:
                 logger.exception(
                     f"git poller scheduled push failed: "
