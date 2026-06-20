@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from datetime import datetime, timedelta
+
 from nonebot import get_bots, logger, on_command, require
 from nonebot.adapters.onebot.v11 import Bot, GroupMessageEvent, Message
 from nonebot.exception import FinishedException
@@ -119,6 +121,7 @@ async def _(event: GroupMessageEvent, matcher: Matcher, args: Message = CommandA
             parsed.branch,
         )
         if removed:
+            _schedule_repo_cleanup(identity.key)
             await matcher.finish(f"已取关：{identity.display_name}")
         await matcher.finish(f"本群没有关注：{identity.display_name}")
     except FinishedException:
@@ -376,6 +379,13 @@ async def run_scheduled_check(schedule: str) -> None:
         logger.exception(f"git poller scheduled check failed: {schedule}")
 
 
+async def cleanup_unsubscribed_repo(repo_key: str) -> None:
+    try:
+        service.cleanup_unsubscribed_repo(repo_key)
+    except Exception:
+        logger.exception(f"git poller delayed cleanup failed: repo={repo_key}")
+
+
 def _register_schedules() -> None:
     for schedule_rule in sorted(service.scheduled_rules()):
         _register_schedule(schedule_rule)
@@ -400,6 +410,19 @@ def _register_schedule(schedule_rule: str) -> None:
         **spec.trigger_kwargs,
     )
     logger.info(f"git poller scheduler registered: {spec.description}")
+
+
+def _schedule_repo_cleanup(repo_key: str) -> None:
+    run_at = datetime.now() + timedelta(hours=1)
+    scheduler.add_job(
+        cleanup_unsubscribed_repo,
+        "date",
+        args=[repo_key],
+        id=f"git_poller:cleanup:{repo_key}",
+        run_date=run_at,
+        replace_existing=True,
+    )
+    logger.info(f"git poller delayed cleanup scheduled: repo={repo_key}, run_at={run_at}")
 
 
 def _repo_args(args: Message, *, allow_tail: bool = False):

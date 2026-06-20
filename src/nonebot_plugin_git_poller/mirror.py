@@ -149,6 +149,18 @@ class GitPollerService:
     def mark_pull_success(self, group_id: int, repo_key: str, target_sha: str) -> None:
         self.state.update_last_success(group_id, repo_key, target_sha, _now_iso())
 
+    def cleanup_unsubscribed_repo(self, repo_key: str) -> bool:
+        if self.state.is_repo_key_subscribed(repo_key):
+            logger.info(f"git poller cleanup skipped for subscribed repo: {repo_key}")
+            return False
+        removed_cache = self.git_cache.remove_cache(repo_key)
+        removed_archives = self.archive_builder.remove_archives_for_repo(repo_key)
+        logger.info(
+            f"git poller cleanup finished: repo={repo_key}, "
+            f"cache={removed_cache}, archives={removed_archives}"
+        )
+        return removed_cache or bool(removed_archives)
+
     def _follow_repo_sync(self, group_id: int, url: str, branch: str | None) -> FollowResult:
         target_branch = self._target_branch(branch)
         identity = build_identity(url, target_branch)
@@ -188,7 +200,12 @@ class GitPollerService:
         try:
             previous_sha = subscription.last_success_sha
             payload = self._build_payload(identity, subscription, fetched, previous_sha)
-            archive = self._build_archive(payload, subscription, fetched)
+            archive = self._build_archive(
+                payload,
+                subscription,
+                fetched,
+                group_id=group_id,
+            )
             return PullResult(
                 identity=identity,
                 subscription=subscription,
@@ -283,7 +300,12 @@ class GitPollerService:
                 results.append(
                     DeliveryResult(
                         result=result,
-                        archive=self._build_archive(payload, subscription, fetched),
+                        archive=self._build_archive(
+                            payload,
+                            subscription,
+                            fetched,
+                            group_id=group_id,
+                        ),
                     )
                 )
             finally:
@@ -322,11 +344,28 @@ class GitPollerService:
         payload: UpdatePayload,
         subscription: Subscription,
         fetched,
+        *,
+        group_id: int,
     ) -> ArchiveFile:
+        if subscription.last_archive_path:
+            self.archive_builder.remove_archive(subscription.last_archive_path)
+            self.state.update_last_archive_path(
+                group_id,
+                payload.repo_key,
+                None,
+                _now_iso(),
+            )
         source_dir = self.archive_builder.source_root(payload)
         try:
             fetched.export_head_tree(source_dir)
-            return self.archive_builder.build(payload, subscription, source_dir)
+            archive = self.archive_builder.build(payload, subscription, source_dir)
+            self.state.update_last_archive_path(
+                group_id,
+                payload.repo_key,
+                str(archive.path),
+                _now_iso(),
+            )
+            return archive
         finally:
             shutil.rmtree(source_dir.parent, ignore_errors=True)
 

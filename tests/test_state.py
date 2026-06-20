@@ -88,6 +88,31 @@ def test_update_last_success_only_changes_target_subscription(tmp_path: Path):
     assert store.get_subscription(10001, "repo-b").last_success_sha is None
 
 
+def test_update_last_archive_path_only_changes_target_subscription(tmp_path: Path):
+    state, models = _load_state_module(tmp_path)
+    store = state.StateStore()
+    store.upsert_subscription(
+        10001,
+        "repo-a",
+        models.Subscription(url="https://example.test/a.git", branch="main", schedule="每日04-00"),
+    )
+    store.upsert_subscription(
+        10001,
+        "repo-b",
+        models.Subscription(url="https://example.test/b.git", branch="main", schedule="每日04-00"),
+    )
+
+    store.update_last_archive_path(
+        10001,
+        "repo-a",
+        "/tmp/archive.7z",
+        "2026-06-20T04:00:00+08:00",
+    )
+
+    assert store.get_subscription(10001, "repo-a").last_archive_path == "/tmp/archive.7z"
+    assert store.get_subscription(10001, "repo-b").last_archive_path is None
+
+
 def test_update_schedule_and_archive_password(tmp_path: Path):
     state, models = _load_state_module(tmp_path)
     store = state.StateStore()
@@ -138,3 +163,16 @@ def test_subscriptions_for_schedule_filters_enabled_entries(tmp_path: Path):
     assert [(group_id, repo_key) for group_id, repo_key, _ in matches] == [
         (10001, "repo-a")
     ]
+
+
+def test_is_repo_key_subscribed_checks_all_groups(tmp_path: Path):
+    state, models = _load_state_module(tmp_path)
+    store = state.StateStore()
+    store.upsert_subscription(
+        10002,
+        "repo-a",
+        models.Subscription(url="https://example.test/a.git", branch="main", schedule="每日04-00"),
+    )
+
+    assert store.is_repo_key_subscribed("repo-a") is True
+    assert store.is_repo_key_subscribed("repo-b") is False

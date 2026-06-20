@@ -112,6 +112,24 @@ class StateStore:
             f"repo={repo_key}, sha={sha[:8]}"
         )
 
+    def update_last_archive_path(
+        self,
+        group_id: int,
+        repo_key: str,
+        archive_path: str | None,
+        updated_at: str,
+    ) -> None:
+        subscription = self.get_subscription(group_id, repo_key)
+        if subscription is None:
+            raise KeyError(f"subscription not found: group={group_id}, repo={repo_key}")
+        subscription.last_archive_path = archive_path
+        subscription.updated_at = updated_at
+        self.upsert_subscription(group_id, repo_key, subscription)
+        logger.info(
+            f"git poller last archive path updated: group={group_id}, "
+            f"repo={repo_key}, has_archive={archive_path is not None}"
+        )
+
     def update_schedule(
         self,
         group_id: int,
@@ -160,6 +178,12 @@ class StateStore:
                 if subscription.enabled and subscription.schedule.strip() == target:
                     result.append((group_id, repo_key, subscription))
         return result
+
+    def is_repo_key_subscribed(self, repo_key: str) -> bool:
+        for subscriptions in self.list_all_subscriptions().values():
+            if repo_key in subscriptions:
+                return True
+        return False
 
     def _repo_entry(self, group_id: int, repo_key: str) -> dict[str, Any] | None:
         repos = self._repos_from_state(self.read_state(), group_id)

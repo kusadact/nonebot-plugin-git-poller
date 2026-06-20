@@ -9,8 +9,6 @@
 
 按群订阅 Git 仓库更新的 NoneBot2 插件。每个群可以独立关注多个仓库，插件定时拉取远端仓库并推送 commit 更新摘要和源码压缩包。
 
-插件不包含远端 worker 或特定项目 changelog 提取逻辑。
-
 ## 安装
 
 在 NoneBot 项目目录中安装插件：
@@ -25,8 +23,6 @@ uv add git+https://github.com/kusadact/nonebot-plugin-git-poller.git
 [tool.nonebot]
 plugins = ["nonebot_plugin_git_poller"]
 ```
-
-插件使用 Python 依赖 `dulwich` 拉取 Git 仓库，并使用 `py7zr` 生成 7z 压缩包，不要求系统额外安装 `git` 或 `7z` 命令。
 
 ## 配置
 
@@ -81,7 +77,7 @@ git_poller_max_commits=20
 
 `/关注仓库 仓库url [--分支名]` 在当前群关注仓库。插件只探测远端 HEAD 并记录为 `last_success_sha`，不会推送摘要。同一个群可以关注同一仓库的不同分支。
 
-`/取关仓库 仓库url [--分支名]` 只移除当前群的对应仓库分支订阅，不影响其他群，也不会删除本地缓存文件。
+`/取关仓库 仓库url [--分支名]` 只移除当前群的对应仓库分支订阅，不影响其他群。取关后插件会在 1 小时后检查是否还有群关注同一个仓库分支；如果没有，会清理对应的本地 Git cache 和压缩包。
 
 `/设置仓库 仓库url [--分支名]` 进入设置流程。Bot 会回复：
 
@@ -95,7 +91,7 @@ git_poller_max_commits=20
 
 `/仓库列表` 显示当前群关注的仓库、分支、定时、启用状态、`last_success_sha` 和压缩包密码来源。
 
-`/拉取仓库 仓库url [--分支名]` 立即拉取当前群已关注的仓库，上传源码压缩包，并在上传成功后把 `last_success_sha` 更新到远端最新 HEAD。
+`/拉取仓库 仓库url [--分支名]` 立即拉取当前群已关注的仓库，上传源码压缩包，并在上传成功后把 `last_success_sha` 更新到远端最新 HEAD。生成新压缩包时会清理当前订阅记录的旧压缩包。
 
 `/仓库摘要 仓库url [--分支名]` 拉取远端并展示本群记录与远端 HEAD 的差异；本地与远程相同时只回复相同，不更新 `last_success_sha`。
 
@@ -129,6 +125,7 @@ git_poller_max_commits=20
           "branch": "main",
           "schedule": "每日04-00",
           "last_success_sha": "abcdef...",
+          "last_archive_path": "/.../archives/repo-main-abcdef12-xxxx.7z",
           "archive_password": null,
           "enabled": true
         }

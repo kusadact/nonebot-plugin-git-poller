@@ -11,7 +11,11 @@ from helpers import load_plugin_module
 
 def _load_archive_module(cache_dir: Path):
     nonebot_module = types.ModuleType("nonebot")
-    nonebot_module.logger = types.SimpleNamespace(info=lambda *args, **kwargs: None)
+    nonebot_module.logger = types.SimpleNamespace(
+        info=lambda *args, **kwargs: None,
+        warning=lambda *args, **kwargs: None,
+        exception=lambda *args, **kwargs: None,
+    )
     localstore_module = types.ModuleType("nonebot_plugin_localstore")
     localstore_module.get_plugin_cache_dir = lambda: cache_dir
     sys.modules["nonebot"] = nonebot_module
@@ -51,6 +55,7 @@ def test_archive_builder_creates_plain_7z_by_default(tmp_path: Path):
 
     assert result.path.exists()
     assert result.name == "repo-main-abcdef12.7z"
+    assert result.path.name.startswith("repo-main-abc-repo-main-abcdef12-")
     assert len(result.sha256) == 64
     assert result.password is None
     assert result.password_used is False
@@ -80,3 +85,33 @@ def test_archive_builder_uses_subscription_password(tmp_path: Path):
     assert result.password == "repo-secret"
     with py7zr.SevenZipFile(result.path, "r", password="repo-secret") as compressed:
         assert "source/README.md" in compressed.getnames()
+
+
+def test_archive_builder_removes_archives_for_repo_key(tmp_path: Path):
+    archive, models = _load_archive_module(tmp_path / "cache")
+    source = tmp_path / "source"
+    source.mkdir()
+    (source / "README.md").write_text("hello", encoding="utf-8")
+    builder = archive.ArchiveBuilder()
+
+    result = builder.build(
+        _payload(models),
+        models.Subscription(url="https://example.test/repo.git", branch="main", schedule="每日04-00"),
+        source,
+    )
+    unrelated = builder.archive_dir / "other-repo.7z"
+    unrelated.write_text("keep", encoding="utf-8")
+
+    assert builder.remove_archives_for_repo("repo-main-abc") == 1
+    assert not result.path.exists()
+    assert unrelated.exists()
+
+
+def test_archive_builder_refuses_to_remove_archive_outside_cache(tmp_path: Path):
+    archive, _ = _load_archive_module(tmp_path / "cache")
+    outside = tmp_path / "outside.7z"
+    outside.write_text("keep", encoding="utf-8")
+    builder = archive.ArchiveBuilder()
+
+    assert builder.remove_archive(outside) is False
+    assert outside.exists()

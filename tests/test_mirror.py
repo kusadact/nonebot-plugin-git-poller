@@ -32,6 +32,7 @@ class _State:
     def __init__(self) -> None:
         self.data: dict[int, dict[str, object]] = {}
         self.successes: list[tuple[int, str, str]] = []
+        self.archive_paths: list[tuple[int, str, str | None]] = []
 
     def get_subscription(self, group_id: int, repo_key: str):
         return self.data.get(int(group_id), {}).get(repo_key)
@@ -54,6 +55,18 @@ class _State:
         subscription.updated_at = updated_at
         self.successes.append((int(group_id), repo_key, sha))
 
+    def update_last_archive_path(
+        self,
+        group_id: int,
+        repo_key: str,
+        archive_path: str | None,
+        updated_at: str,
+    ):
+        subscription = self.data[int(group_id)][repo_key]
+        subscription.last_archive_path = archive_path
+        subscription.updated_at = updated_at
+        self.archive_paths.append((int(group_id), repo_key, archive_path))
+
     def subscriptions_for_schedule(self, schedule: str):
         return [
             (group_id, repo_key, subscription)
@@ -61,6 +74,9 @@ class _State:
             for repo_key, subscription in repos.items()
             if subscription.enabled and subscription.schedule == schedule
         ]
+
+    def is_repo_key_subscribed(self, repo_key: str):
+        return any(repo_key in repos for repos in self.data.values())
 
 
 class _Fetched:
@@ -94,6 +110,7 @@ class _Fetched:
 class _GitCache:
     def __init__(self) -> None:
         self.calls: list[tuple[str, str, str]] = []
+        self.removed: list[str] = []
         self.head_sha = "newsha1234567890"
         self.commits = [
             models.CommitInfo(
@@ -114,10 +131,16 @@ class _GitCache:
         self.calls.append(("peek", url, branch))
         return self.head_sha
 
+    def remove_cache(self, repo_key: str):
+        self.removed.append(repo_key)
+        return True
+
 
 class _ArchiveBuilder:
     def __init__(self) -> None:
         self.calls: list[tuple[str, str | None]] = []
+        self.removed_archives: list[str] = []
+        self.removed_repo_keys: list[str] = []
 
     def source_root(self, payload):
         return Path("/tmp") / f"{payload.repo_key}-{payload.target_short_sha}"
@@ -125,12 +148,20 @@ class _ArchiveBuilder:
     def build(self, payload, subscription, source_dir):
         self.calls.append((payload.repo_key, subscription.archive_password))
         return SimpleNamespace(
-            path=Path("/tmp/archive.7z"),
+            path=Path(f"/tmp/{payload.repo_key}-archive.7z"),
             name=f"{payload.repo_name}.7z",
             sha256="0" * 64,
             password=subscription.archive_password,
             password_used=subscription.archive_password is not None,
         )
+
+    def remove_archive(self, path):
+        self.removed_archives.append(str(path))
+        return True
+
+    def remove_archives_for_repo(self, repo_key: str):
+        self.removed_repo_keys.append(repo_key)
+        return 1
 
 
 def _service(
@@ -237,10 +268,66 @@ def test_pull_repo_builds_archive_without_marking_success():
     assert result.target_sha == "newsha1234567890"
     assert result.archive.name == "repo.7z"
     assert archive_builder.calls == [(identity.key, None)]
+    assert state.get_subscription(10001, identity.key).last_archive_path == str(result.archive.path)
 
     service.mark_pull_success(10001, identity.key, result.target_sha)
 
     assert state.successes == [(10001, identity.key, "newsha1234567890")]
+
+
+def test_pull_repo_removes_previous_archive_before_building_new_one():
+    state = _State()
+    git_cache = _GitCache()
+    archive_builder = _ArchiveBuilder()
+    service = _service(state, git_cache, archive_builder)
+    identity = repository.build_identity("https://example.test/repo.git", "main")
+    state.upsert_subscription(
+        10001,
+        identity.key,
+        models.Subscription(
+            url=identity.url,
+            branch="main",
+            schedule="每日04-00",
+            last_success_sha="oldsha123",
+            last_archive_path="/tmp/old.7z",
+        ),
+    )
+
+    result = asyncio.run(service.pull_repo(10001, "https://example.test/repo"))
+
+    assert archive_builder.removed_archives == ["/tmp/old.7z"]
+    assert state.archive_paths == [
+        (10001, identity.key, None),
+        (10001, identity.key, str(result.archive.path)),
+    ]
+
+
+def test_cleanup_unsubscribed_repo_skips_active_subscription():
+    state = _State()
+    git_cache = _GitCache()
+    archive_builder = _ArchiveBuilder()
+    service = _service(state, git_cache, archive_builder)
+    identity = repository.build_identity("https://example.test/repo.git", "main")
+    state.upsert_subscription(
+        10001,
+        identity.key,
+        models.Subscription(url=identity.url, branch="main", schedule="每日04-00"),
+    )
+
+    assert service.cleanup_unsubscribed_repo(identity.key) is False
+    assert git_cache.removed == []
+    assert archive_builder.removed_repo_keys == []
+
+
+def test_cleanup_unsubscribed_repo_removes_cache_and_archives():
+    state = _State()
+    git_cache = _GitCache()
+    archive_builder = _ArchiveBuilder()
+    service = _service(state, git_cache, archive_builder)
+
+    assert service.cleanup_unsubscribed_repo("repo-key") is True
+    assert git_cache.removed == ["repo-key"]
+    assert archive_builder.removed_repo_keys == ["repo-key"]
 
 
 def test_summarize_repo_builds_payload_without_marking_success():

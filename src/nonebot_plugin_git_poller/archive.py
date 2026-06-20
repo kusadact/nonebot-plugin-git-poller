@@ -36,7 +36,7 @@ class ArchiveBuilder:
     ) -> ArchiveFile:
         password = _clean_password(subscription.archive_password) or self.default_password
         archive_name = _archive_name(payload)
-        archive_path = _unique_archive_path(self.archive_dir, archive_name)
+        archive_path = _unique_archive_path(self.archive_dir, payload.repo_key, archive_name)
 
         logger.info(
             f"git poller building archive: repo={payload.repo_key}, "
@@ -56,15 +56,44 @@ class ArchiveBuilder:
         name = _source_root_name(payload)
         return Path(tempfile.mkdtemp(prefix=f"{name}-", dir=str(self.archive_dir))) / name
 
+    def remove_archive(self, path: str | Path | None) -> bool:
+        if not path:
+            return False
+        archive_path = Path(path)
+        try:
+            archive_path.resolve().relative_to(self.archive_dir.resolve())
+        except ValueError:
+            logger.warning(f"git poller refused to remove archive outside cache: {archive_path}")
+            return False
+        if not archive_path.exists():
+            return False
+        archive_path.unlink()
+        logger.info(f"git poller removed archive: {archive_path}")
+        return True
+
+    def remove_archives_for_repo(self, repo_key: str) -> int:
+        count = 0
+        prefix = f"{_safe_name(repo_key)}-"
+        for path in self.archive_dir.glob(f"{prefix}*.7z"):
+            try:
+                if path.is_file():
+                    path.unlink()
+                    count += 1
+            except OSError:
+                logger.exception(f"git poller failed to remove archive: {path}")
+        if count:
+            logger.info(f"git poller removed {count} archives for repo: {repo_key}")
+        return count
+
 
 def _archive_name(payload: UpdatePayload) -> str:
     return f"{_source_root_name(payload)}.7z"
 
 
-def _unique_archive_path(archive_dir: Path, archive_name: str) -> Path:
+def _unique_archive_path(archive_dir: Path, repo_key: str, archive_name: str) -> Path:
     stem = Path(archive_name).stem
     with tempfile.NamedTemporaryFile(
-        prefix=f"{stem}-",
+        prefix=f"{_safe_name(repo_key)}-{_safe_name(stem)}-",
         suffix=".7z",
         dir=archive_dir,
         delete=False,

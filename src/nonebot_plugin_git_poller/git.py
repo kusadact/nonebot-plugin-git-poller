@@ -3,6 +3,7 @@ from __future__ import annotations
 from datetime import datetime, timezone, timedelta
 from io import BytesIO
 from pathlib import Path
+import shutil
 from typing import Any
 
 from dulwich import porcelain
@@ -64,6 +65,19 @@ class GitRepositoryCache:
             f"git poller remote head resolved: {url} branch={branch} sha={head_sha[:8]}"
         )
         return head_sha
+
+    def remove_cache(self, repo_key: str) -> bool:
+        repo_path = self.cache_dir / repo_key
+        try:
+            repo_path.resolve().relative_to(self.cache_dir.resolve())
+        except ValueError:
+            logger.warning(f"git poller refused to remove cache outside repo cache: {repo_path}")
+            return False
+        if not repo_path.exists():
+            return False
+        shutil.rmtree(repo_path)
+        logger.info(f"git poller removed repository cache: {repo_path}")
+        return True
 
     def _porcelain_transport_kwargs(self, url: str) -> dict[str, Any]:
         kwargs: dict[str, Any] = {"quiet": True}
