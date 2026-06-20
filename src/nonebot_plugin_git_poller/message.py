@@ -3,6 +3,8 @@ from __future__ import annotations
 from nonebot import logger
 from nonebot.adapters.onebot.v11 import Bot, Message, MessageSegment
 
+from .config import Config
+from .file_server import build_archive_download_url
 from .models import UpdatePayload
 
 
@@ -26,14 +28,32 @@ async def send_update_to_group(bot: Bot, group_id: int, payload: UpdatePayload) 
     logger.info(f"git poller update sent to group {group_id}: {payload.repo_key}")
 
 
-async def upload_archive_to_group(bot: Bot, group_id: int, archive) -> None:
+async def upload_archive_to_group(
+    bot: Bot,
+    group_id: int,
+    archive,
+    *,
+    config: Config,
+) -> None:
+    upload_file = build_archive_download_url(archive.path, config)
+    if upload_file:
+        logger.info(
+            f"git poller archive upload source for group {group_id} uses HTTP route: "
+            f"{upload_file.split('?', 1)[0]}"
+        )
+    else:
+        upload_file = str(archive.path)
+        logger.warning(
+            "git_poller_file_base_url is not configured; falling back to local archive path. "
+            "This only works when the OneBot implementation can read the same filesystem."
+        )
     logger.info(
         f"git poller uploading archive to group {group_id}: "
-        f"name={archive.name}, password={archive.password_used}"
+        f"name={archive.name}, password={archive.password_used}, file={upload_file}"
     )
     await bot.upload_group_file(
         group_id=int(group_id),
-        file=str(archive.path),
+        file=upload_file,
         name=archive.name,
     )
     logger.info(f"git poller archive uploaded to group {group_id}: {archive.name}")

@@ -5,21 +5,31 @@ from pathlib import Path
 import sys
 import types
 from types import SimpleNamespace
+from urllib.parse import parse_qs, urlparse
 
 from helpers import load_plugin_module
 
 nonebot_module = types.ModuleType("nonebot")
-nonebot_module.logger = SimpleNamespace(debug=lambda *args, **kwargs: None, info=lambda *args, **kwargs: None)
+nonebot_module.logger = SimpleNamespace(
+    debug=lambda *args, **kwargs: None,
+    info=lambda *args, **kwargs: None,
+    warning=lambda *args, **kwargs: None,
+)
+nonebot_module.get_plugin_config = lambda config_cls: config_cls()
+nonebot_module.get_driver = lambda: SimpleNamespace()
 adapters_module = types.ModuleType("nonebot.adapters")
 onebot_module = types.ModuleType("nonebot.adapters.onebot")
 v11_module = types.ModuleType("nonebot.adapters.onebot.v11")
 v11_module.Bot = object
 v11_module.Message = str
 v11_module.MessageSegment = SimpleNamespace(node_custom=lambda **kwargs: ("node", kwargs))
+localstore_module = types.ModuleType("nonebot_plugin_localstore")
+localstore_module.get_plugin_cache_dir = lambda: Path("/tmp/cache")
 sys.modules["nonebot"] = nonebot_module
 sys.modules["nonebot.adapters"] = adapters_module
 sys.modules["nonebot.adapters.onebot"] = onebot_module
 sys.modules["nonebot.adapters.onebot.v11"] = v11_module
+sys.modules["nonebot_plugin_localstore"] = localstore_module
 
 models = load_plugin_module("models")
 message = load_plugin_module("message")
@@ -60,6 +70,17 @@ def _payload():
     )
 
 
+def _config(**overrides):
+    values = {
+        "git_poller_file_base_url": None,
+        "git_poller_file_route_prefix": "/git-poller/files",
+        "git_poller_file_token": "secret",
+        "git_poller_file_token_ttl": 3600,
+    }
+    values.update(overrides)
+    return SimpleNamespace(**values)
+
+
 def test_build_forward_nodes_contains_summary_and_commits():
     nodes = message.build_forward_nodes(_payload())
 
@@ -87,9 +108,37 @@ def test_upload_archive_to_group_uses_group_file_api():
     bot = _Bot()
     archive = SimpleNamespace(path=Path("/tmp/repo.7z"), name="repo.7z", password_used=False)
 
-    asyncio.run(message.upload_archive_to_group(bot, 10001, archive))
+    asyncio.run(message.upload_archive_to_group(bot, 10001, archive, config=_config()))
 
     assert bot.calls[0][0] == "upload_group_file"
     assert bot.calls[0][1]["group_id"] == 10001
     assert bot.calls[0][1]["file"] == "/tmp/repo.7z"
     assert bot.calls[0][1]["name"] == "repo.7z"
+
+
+def test_upload_archive_to_group_uses_file_base_url():
+    bot = _Bot()
+    archive = SimpleNamespace(
+        path=Path("/tmp/repo main.7z"),
+        name="repo-main.7z",
+        password_used=False,
+    )
+
+    asyncio.run(
+        message.upload_archive_to_group(
+            bot,
+            10001,
+            archive,
+            config=_config(git_poller_file_base_url="http://127.0.0.1:8080"),
+        )
+    )
+
+    assert bot.calls[0][0] == "upload_group_file"
+    parsed = urlparse(str(bot.calls[0][1]["file"]))
+    query = parse_qs(parsed.query)
+    assert parsed.scheme == "http"
+    assert parsed.netloc == "127.0.0.1:8080"
+    assert parsed.path == "/git-poller/files/repo%20main.7z"
+    assert "expires" in query
+    assert "token" in query
+    assert bot.calls[0][1]["name"] == "repo-main.7z"

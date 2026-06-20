@@ -40,6 +40,10 @@ plugins = ["nonebot_plugin_git_poller"]
 | `git_poller_proxy` | 空 | HTTP/HTTPS Git 拉取代理。 |
 | `git_poller_timeout` | `60.0` | HTTP/HTTPS Git 拉取超时，单位秒。 |
 | `git_poller_archive_password` | 空 | 全局默认压缩包密码；为空时默认不设置密码。 |
+| `git_poller_file_base_url` | 空 | 上传压缩包时使用的 NoneBot HTTP 服务根地址；为空时直接传本地文件路径。 |
+| `git_poller_file_route_prefix` | `/git-poller/files` | 压缩包下载路由前缀。 |
+| `git_poller_file_token` | 空 | 压缩包下载链接签名密钥；为空时使用运行期随机密钥。 |
+| `git_poller_file_token_ttl` | `3600` | 压缩包下载链接有效期，单位秒。 |
 | `git_poller_command_priority` | `10` | 命令优先级。 |
 | `git_poller_max_commits` | `20` | 单次最多展示 commit 数。 |
 
@@ -52,9 +56,15 @@ git_poller_default_branch="main"
 git_poller_proxy="http://127.0.0.1:7890"
 git_poller_timeout=60
 git_poller_archive_password=""
+git_poller_file_base_url=""
+git_poller_file_route_prefix="/git-poller/files"
+git_poller_file_token=""
+git_poller_file_token_ttl=3600
 git_poller_command_priority=10
 git_poller_max_commits=20
 ```
+
+`git_poller_file_base_url` 用于 NapCat 等 OneBot 实现和 bot 分离部署的场景。插件会在 localstore cache 的 `archives` 目录生成压缩包；默认上传时把本地绝对路径传给 OneBot。如果 OneBot 运行在另一个 Docker 容器里读不到这个路径，可以设置 NoneBot 容器在同一 Docker 网络内可访问的服务根地址，例如 `http://nonebot:8088`。插件会生成带过期时间和签名的下载 URL：`git_poller_file_base_url + git_poller_file_route_prefix + 文件名`，群文件展示名仍然保持为仓库压缩包名。
 
 ## 指令
 

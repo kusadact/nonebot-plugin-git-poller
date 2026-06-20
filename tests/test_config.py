@@ -42,5 +42,9 @@ def test_config_defaults_are_global_only():
     assert config.git_poller_timezone == "Asia/Shanghai"
     assert config.git_poller_default_branch == "main"
     assert config.git_poller_archive_password is None
+    assert config.git_poller_file_base_url is None
+    assert config.git_poller_file_route_prefix == "/git-poller/files"
+    assert config.git_poller_file_token is None
+    assert config.git_poller_file_token_ttl == 3600
     assert config.git_poller_command_priority == 10
     assert config.git_poller_max_commits == 20

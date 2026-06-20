@@ -14,6 +14,7 @@ from nonebot_plugin_apscheduler import scheduler
 
 from .command_args import parse_repo_command_args
 from .config import Config, plugin_config
+from .file_server import register_archive_file_route
 from .message import send_update_to_group, upload_archive_to_group
 from .mirror import GitPollerService
 from .schedule import parse_schedule
@@ -261,7 +262,12 @@ async def _(bot: Bot, event: GroupMessageEvent, matcher: Matcher, args: Message 
     group_id = int(event.group_id)
     try:
         result = await service.pull_repo(group_id, parsed.url, parsed.branch)
-        await upload_archive_to_group(bot, group_id, result.archive)
+        await upload_archive_to_group(
+            bot,
+            group_id,
+            result.archive,
+            config=plugin_config,
+        )
         service.mark_pull_success(group_id, result.identity.key, result.target_sha)
         previous = result.previous_sha[:8] if result.previous_sha else "未记录"
         target = result.target_sha[:8]
@@ -328,7 +334,12 @@ async def run_scheduled_check(schedule: str) -> None:
         for result in results:
             try:
                 await send_update_to_group(bot, result.result.group_id, result.result.payload)
-                await upload_archive_to_group(bot, result.result.group_id, result.archive)
+                await upload_archive_to_group(
+                    bot,
+                    result.result.group_id,
+                    result.archive,
+                    config=plugin_config,
+                )
             except Exception:
                 logger.exception(
                     f"git poller scheduled push failed: "
@@ -378,3 +389,4 @@ def _same_config_session(event: GroupMessageEvent, matcher: Matcher) -> bool:
 
 
 _register_schedules()
+register_archive_file_route(plugin_config)
