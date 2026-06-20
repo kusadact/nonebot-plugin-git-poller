@@ -120,7 +120,10 @@ class GitPollerService:
         identity, existing = self._find_subscription(group_id, url, branch)
         if existing is None:
             return identity, False
-        return identity, self.state.remove_subscription(group_id, identity.key)
+        removed = self.state.remove_subscription(group_id, identity.key)
+        if removed and existing.last_archive_path:
+            self.archive_builder.remove_archive(existing.last_archive_path)
+        return identity, removed
 
     def get_repo_subscription(
         self,
@@ -409,16 +412,8 @@ class GitPollerService:
             return requested, None
         if len(matches) > 1:
             raise ValueError("本群关注了这个仓库的多个分支，请使用 --分支名 指定。")
-        repo_key, subscription = matches[0]
-        identity = build_identity(subscription.url, subscription.branch)
-        if identity.key != repo_key:
-            identity = RepositoryIdentity(
-                key=repo_key,
-                url=identity.url,
-                display_name=identity.display_name,
-                web_url=identity.web_url,
-            )
-        return identity, subscription
+        _, subscription = matches[0]
+        return build_identity(subscription.url, subscription.branch), subscription
 
     @staticmethod
     def _explicit_branch(branch: str | None) -> str | None:

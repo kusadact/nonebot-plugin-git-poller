@@ -83,6 +83,13 @@ def test_interval_days_schedule_keeps_stable_calendar_anchor(monkeypatch):
     assert spec.trigger_kwargs["start_date"].isoformat() == "2026-06-24T04:30:00+08:00"
 
 
+def test_interval_days_schedule_handles_large_interval_without_looping(monkeypatch):
+    schedule = _load_schedule_module()
+
+    with pytest.raises(ValueError, match="1 到 30 天"):
+        schedule.parse_schedule("每1000000000天04:30")
+
+
 def test_empty_schedule_disables_job():
     schedule = _load_schedule_module()
 

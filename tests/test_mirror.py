@@ -383,6 +383,33 @@ def test_cleanup_unsubscribed_repo_skips_active_subscription():
     assert archive_builder.removed_repo_keys == []
 
 
+def test_unfollow_repo_removes_subscription_archive_even_when_repo_still_subscribed():
+    state = _State()
+    git_cache = _GitCache()
+    archive_builder = _ArchiveBuilder()
+    service = _service(state, git_cache, archive_builder)
+    identity = repository.build_identity("https://example.test/repo.git", "main")
+    for group_id, archive_path in ((10001, "/tmp/group-a.7z"), (10002, "/tmp/group-b.7z")):
+        state.upsert_subscription(
+            group_id,
+            identity.key,
+            models.Subscription(
+                url=identity.url,
+                branch="main",
+                schedule="每日04:00",
+                last_archive_path=archive_path,
+            ),
+        )
+
+    removed_identity, removed = service.unfollow_repo(10001, "https://example.test/repo")
+
+    assert removed is True
+    assert removed_identity.key == identity.key
+    assert archive_builder.removed_archives == ["/tmp/group-a.7z"]
+    assert state.get_subscription(10001, identity.key) is None
+    assert state.get_subscription(10002, identity.key).last_archive_path == "/tmp/group-b.7z"
+
+
 def test_cleanup_unsubscribed_repo_removes_cache_and_archives():
     state = _State()
     git_cache = _GitCache()

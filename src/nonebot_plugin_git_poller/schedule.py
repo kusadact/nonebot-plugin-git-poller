@@ -11,6 +11,7 @@ _DAILY_PATTERN = re.compile(r"^每日(\d{1,2}):(\d{2})$")
 _INTERVAL_DAYS_PATTERN = re.compile(r"^每([1-9]\d*)天(\d{1,2}):(\d{2})$")
 _WEEKLY_PATTERN = re.compile(r"^周([一二三四五六日天])(\d{1,2}):(\d{2})$")
 _INTERVAL_ANCHOR_ORDINAL = date(1970, 1, 1).toordinal()
+_MAX_INTERVAL_DAYS = 30
 _WEEKDAY_MAP = {
     "一": "mon",
     "二": "tue",
@@ -60,6 +61,8 @@ def parse_schedule(value: str, timezone_name: str = "Asia/Shanghai") -> Schedule
     interval_days = _INTERVAL_DAYS_PATTERN.fullmatch(raw)
     if interval_days:
         days = int(interval_days.group(1))
+        if days > _MAX_INTERVAL_DAYS:
+            raise ValueError(f"间隔天数必须在 1 到 {_MAX_INTERVAL_DAYS} 天之间。")
         hour, minute = _parse_time(interval_days.group(2), interval_days.group(3))
         return ScheduleSpec(
             raw=raw,
@@ -94,7 +97,8 @@ def parse_schedule(value: str, timezone_name: str = "Asia/Shanghai") -> Schedule
 
     raise ValueError(
         "定时格式应为 每日hh:mm、每x天hh:mm 或 周xhh:mm，"
-        "天数 x 使用正整数，周 x 使用一二三四五六日/天。"
+        f"天数 x 使用 1 到 {_MAX_INTERVAL_DAYS} 的整数，"
+        "周 x 使用一二三四五六日/天。"
     )
 
 
@@ -125,9 +129,9 @@ def _next_interval_start_date(
 ) -> datetime:
     now = datetime.now(timezone)
     candidate = now.replace(hour=hour, minute=minute, second=0, microsecond=0)
-    while (
-        candidate <= now
-        or (candidate.date().toordinal() - _INTERVAL_ANCHOR_ORDINAL) % days != 0
-    ):
+    if candidate <= now:
         candidate += timedelta(days=1)
+    offset = (candidate.date().toordinal() - _INTERVAL_ANCHOR_ORDINAL) % days
+    if offset:
+        candidate += timedelta(days=days - offset)
     return candidate
