@@ -96,6 +96,13 @@ class GitRepositoryCache:
         logger.info(f"git poller removed repository cache: {repo_path}")
         return True
 
+    def cached_repo_keys(self) -> set[str]:
+        result: set[str] = set()
+        for path in self.cache_dir.iterdir():
+            if path.is_dir() and _looks_like_bare_repo(path):
+                result.add(path.name)
+        return result
+
     def _porcelain_transport_kwargs(self, url: str) -> dict[str, Any]:
         kwargs: dict[str, Any] = {"quiet": True}
         pool_manager = self._pool_manager(url)

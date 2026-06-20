@@ -69,6 +69,20 @@ def test_parse_interval_days_schedule(monkeypatch):
     assert spec.trigger_kwargs["start_date"].isoformat() == "2026-06-21T04:30:00+08:00"
 
 
+def test_interval_days_schedule_keeps_stable_calendar_anchor(monkeypatch):
+    schedule = _load_schedule_module()
+
+    class _FixedDateTime(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return cls(2026, 6, 21, 5, 0, tzinfo=tz)
+
+    monkeypatch.setattr(schedule, "datetime", _FixedDateTime)
+    spec = schedule.parse_schedule("每3天04:30")
+
+    assert spec.trigger_kwargs["start_date"].isoformat() == "2026-06-24T04:30:00+08:00"
+
+
 def test_empty_schedule_disables_job():
     schedule = _load_schedule_module()
 

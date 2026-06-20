@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 import re
 from typing import Any
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
@@ -10,6 +10,7 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 _DAILY_PATTERN = re.compile(r"^每日(\d{1,2}):(\d{2})$")
 _INTERVAL_DAYS_PATTERN = re.compile(r"^每([1-9]\d*)天(\d{1,2}):(\d{2})$")
 _WEEKLY_PATTERN = re.compile(r"^周([一二三四五六日天])(\d{1,2}):(\d{2})$")
+_INTERVAL_ANCHOR_ORDINAL = date(1970, 1, 1).toordinal()
 _WEEKDAY_MAP = {
     "一": "mon",
     "二": "tue",
@@ -65,7 +66,7 @@ def parse_schedule(value: str, timezone_name: str = "Asia/Shanghai") -> Schedule
             trigger="interval",
             trigger_kwargs={
                 "days": days,
-                "start_date": _next_start_date(hour, minute, timezone),
+                "start_date": _next_interval_start_date(days, hour, minute, timezone),
                 "timezone": timezone,
             },
             description=f"每 {days} 天 {_format_time(hour, minute)} ({timezone_name})",
@@ -116,9 +117,17 @@ def _format_time(hour: int, minute: int) -> str:
     return f"{hour:02d}:{minute:02d}"
 
 
-def _next_start_date(hour: int, minute: int, timezone: ZoneInfo) -> datetime:
+def _next_interval_start_date(
+    days: int,
+    hour: int,
+    minute: int,
+    timezone: ZoneInfo,
+) -> datetime:
     now = datetime.now(timezone)
     candidate = now.replace(hour=hour, minute=minute, second=0, microsecond=0)
-    if candidate <= now:
+    while (
+        candidate <= now
+        or (candidate.date().toordinal() - _INTERVAL_ANCHOR_ORDINAL) % days != 0
+    ):
         candidate += timedelta(days=1)
     return candidate

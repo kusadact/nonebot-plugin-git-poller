@@ -111,6 +111,7 @@ class _GitCache:
     def __init__(self) -> None:
         self.calls: list[tuple[str, str, str | None]] = []
         self.removed: list[str] = []
+        self.cached_keys: set[str] = set()
         self.default_branch = "main"
         self.head_sha = "newsha1234567890"
         self.commits = [
@@ -140,12 +141,16 @@ class _GitCache:
         self.removed.append(repo_key)
         return True
 
+    def cached_repo_keys(self):
+        return set(self.cached_keys)
+
 
 class _ArchiveBuilder:
     def __init__(self) -> None:
         self.calls: list[tuple[str, str | None]] = []
         self.removed_archives: list[str] = []
         self.removed_repo_keys: list[str] = []
+        self.removed_except: set[str] | None = None
 
     def source_root(self, payload):
         return Path("/tmp") / f"{payload.repo_key}-{payload.target_short_sha}"
@@ -167,6 +172,10 @@ class _ArchiveBuilder:
     def remove_archives_for_repo(self, repo_key: str):
         self.removed_repo_keys.append(repo_key)
         return 1
+
+    def remove_archives_except(self, active_repo_keys: set[str]):
+        self.removed_except = set(active_repo_keys)
+        return 2
 
 
 def _service(
@@ -279,6 +288,57 @@ def test_pull_repo_builds_archive_without_marking_success():
     assert state.successes == [(10001, identity.key, "newsha1234567890")]
 
 
+def test_pull_repo_without_branch_uses_unique_local_subscription():
+    state = _State()
+    git_cache = _GitCache()
+    git_cache.default_branch = "master"
+    service = _service(state, git_cache)
+    identity = repository.build_identity("https://example.test/repo.git", "main")
+    state.upsert_subscription(
+        10001,
+        identity.key,
+        models.Subscription(
+            url=identity.url,
+            branch="main",
+            schedule="每日04:00",
+            last_success_sha="oldsha123",
+        ),
+    )
+
+    result = asyncio.run(service.pull_repo(10001, "https://example.test/repo"))
+
+    assert result.identity.key == identity.key
+    assert result.subscription.branch == "main"
+    assert ("resolve", "https://example.test/repo.git", None) not in git_cache.calls
+    assert git_cache.calls[-1] == (identity.key, identity.url, "main")
+
+
+def test_unbranched_repo_command_requires_branch_when_multiple_subscriptions_exist():
+    state = _State()
+    git_cache = _GitCache()
+    service = _service(state, git_cache)
+    main = repository.build_identity("https://example.test/repo.git", "main")
+    dev = repository.build_identity("https://example.test/repo.git", "dev")
+    for identity, branch in ((main, "main"), (dev, "dev")):
+        state.upsert_subscription(
+            10001,
+            identity.key,
+            models.Subscription(
+                url=identity.url,
+                branch=branch,
+                schedule="每日04:00",
+                last_success_sha="oldsha123",
+            ),
+        )
+
+    try:
+        asyncio.run(service.pull_repo(10001, "https://example.test/repo"))
+    except ValueError as exc:
+        assert "多个分支" in str(exc)
+    else:
+        raise AssertionError("unbranched command should require an explicit branch")
+
+
 def test_pull_repo_removes_previous_archive_before_building_new_one():
     state = _State()
     git_cache = _GitCache()
@@ -332,6 +392,27 @@ def test_cleanup_unsubscribed_repo_removes_cache_and_archives():
     assert service.cleanup_unsubscribed_repo("repo-key") is True
     assert git_cache.removed == ["repo-key"]
     assert archive_builder.removed_repo_keys == ["repo-key"]
+
+
+def test_cleanup_orphaned_storage_removes_only_unsubscribed_cache_and_archives():
+    state = _State()
+    git_cache = _GitCache()
+    archive_builder = _ArchiveBuilder()
+    service = _service(state, git_cache, archive_builder)
+    active = repository.build_identity("https://example.test/repo.git", "main")
+    state.upsert_subscription(
+        10001,
+        active.key,
+        models.Subscription(url=active.url, branch="main", schedule="每日04:00"),
+    )
+    git_cache.cached_keys = {active.key, "orphan-key"}
+
+    removed_caches, removed_archives = service.cleanup_orphaned_storage()
+
+    assert removed_caches == 1
+    assert removed_archives == 2
+    assert git_cache.removed == ["orphan-key"]
+    assert archive_builder.removed_except == {active.key}
 
 
 def test_summarize_repo_builds_payload_without_marking_success():

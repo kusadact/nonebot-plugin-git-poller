@@ -87,6 +87,19 @@ def test_git_repository_cache_peeks_remote_head_without_clone(tmp_path: Path):
     assert not (tmp_path / "cache" / "repos" / "repo").exists()
 
 
+def test_git_repository_cache_lists_cached_repo_keys(tmp_path: Path):
+    GitRepositoryCache = _load_git_module(tmp_path / "cache")
+    cache = GitRepositoryCache(
+        SimpleNamespace(git_poller_proxy=None, git_poller_timeout=60.0)
+    )
+    repo_path = cache.cache_dir / "repo-key"
+    porcelain.init(repo_path, bare=True)
+    unrelated = cache.cache_dir / "not-a-repo"
+    unrelated.mkdir()
+
+    assert cache.cached_repo_keys() == {"repo-key"}
+
+
 def test_git_repository_cache_peeks_http_head_without_porcelain_ls_remote(
     tmp_path: Path,
     monkeypatch,

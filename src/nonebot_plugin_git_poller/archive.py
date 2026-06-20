@@ -85,6 +85,23 @@ class ArchiveBuilder:
             logger.info(f"git poller removed {count} archives for repo: {repo_key}")
         return count
 
+    def remove_archives_except(self, active_repo_keys: set[str]) -> int:
+        active_prefixes = {f"{_safe_name(repo_key)}-" for repo_key in active_repo_keys}
+        count = 0
+        for path in self.archive_dir.glob("*.7z"):
+            if not path.is_file():
+                continue
+            if any(path.name.startswith(prefix) for prefix in active_prefixes):
+                continue
+            try:
+                path.unlink()
+                count += 1
+            except OSError:
+                logger.exception(f"git poller failed to remove orphan archive: {path}")
+        if count:
+            logger.info(f"git poller removed {count} orphan archives")
+        return count
+
 
 def _archive_name(payload: UpdatePayload) -> str:
     return f"{_source_root_name(payload)}.7z"

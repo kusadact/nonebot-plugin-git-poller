@@ -392,6 +392,13 @@ def _register_schedules() -> None:
         _register_schedule(schedule_rule)
 
 
+def _cleanup_orphaned_storage_on_startup() -> None:
+    try:
+        service.cleanup_orphaned_storage()
+    except Exception:
+        logger.exception("git poller startup orphan cleanup failed")
+
+
 def _register_schedule(schedule_rule: str) -> None:
     try:
         spec = parse_schedule(schedule_rule, plugin_config.git_poller_timezone)
@@ -438,4 +445,5 @@ def _same_config_session(event: GroupMessageEvent, matcher: Matcher) -> bool:
 
 
 _register_schedules()
+_cleanup_orphaned_storage_on_startup()
 register_archive_file_route(plugin_config)

@@ -117,8 +117,9 @@ class GitPollerService:
         url: str,
         branch: str | None = None,
     ) -> tuple[RepositoryIdentity, bool]:
-        target_branch = self._resolve_target_branch(url, branch)
-        identity = build_identity(url, target_branch)
+        identity, existing = self._find_subscription(group_id, url, branch)
+        if existing is None:
+            return identity, False
         return identity, self.state.remove_subscription(group_id, identity.key)
 
     def get_repo_subscription(
@@ -162,6 +163,23 @@ class GitPollerService:
             f"cache={removed_cache}, archives={removed_archives}"
         )
         return removed_cache or bool(removed_archives)
+
+    def cleanup_orphaned_storage(self) -> tuple[int, int]:
+        active_repo_keys = {
+            repo_key
+            for subscriptions in self.state.list_all_subscriptions().values()
+            for repo_key in subscriptions
+        }
+        removed_caches = 0
+        for repo_key in sorted(self.git_cache.cached_repo_keys() - active_repo_keys):
+            if self.git_cache.remove_cache(repo_key):
+                removed_caches += 1
+        removed_archives = self.archive_builder.remove_archives_except(active_repo_keys)
+        logger.info(
+            f"git poller orphan cleanup finished: "
+            f"cache={removed_caches}, archives={removed_archives}"
+        )
+        return removed_caches, removed_archives
 
     def _follow_repo_sync(self, group_id: int, url: str, branch: str | None) -> FollowResult:
         remote_head = self.git_cache.resolve_remote_head(
@@ -230,9 +248,7 @@ class GitPollerService:
         url: str,
         branch: str | None,
     ) -> tuple[RepositoryIdentity, Subscription]:
-        target_branch = self._resolve_target_branch(url, branch)
-        identity = build_identity(url, target_branch)
-        subscription = self.state.get_subscription(group_id, identity.key)
+        identity, subscription = self._find_subscription(group_id, url, branch)
         if subscription is None:
             raise KeyError("本群尚未关注这个仓库。")
         return identity, subscription
@@ -372,12 +388,37 @@ class GitPollerService:
         finally:
             shutil.rmtree(source_dir.parent, ignore_errors=True)
 
-    def _resolve_target_branch(self, url: str, branch: str | None) -> str:
+    def _find_subscription(
+        self,
+        group_id: int,
+        url: str,
+        branch: str | None,
+    ) -> tuple[RepositoryIdentity, Subscription | None]:
         explicit = self._explicit_branch(branch)
         if explicit is not None:
-            return explicit
-        normalized_url = build_identity(url).url
-        return self.git_cache.resolve_remote_head(normalized_url).branch
+            identity = build_identity(url, explicit)
+            return identity, self.state.get_subscription(group_id, identity.key)
+
+        requested = build_identity(url)
+        matches = [
+            (repo_key, subscription)
+            for repo_key, subscription in self.state.list_group_subscriptions(group_id).items()
+            if subscription.url == requested.url
+        ]
+        if not matches:
+            return requested, None
+        if len(matches) > 1:
+            raise ValueError("本群关注了这个仓库的多个分支，请使用 --分支名 指定。")
+        repo_key, subscription = matches[0]
+        identity = build_identity(subscription.url, subscription.branch)
+        if identity.key != repo_key:
+            identity = RepositoryIdentity(
+                key=repo_key,
+                url=identity.url,
+                display_name=identity.display_name,
+                web_url=identity.web_url,
+            )
+        return identity, subscription
 
     @staticmethod
     def _explicit_branch(branch: str | None) -> str | None:

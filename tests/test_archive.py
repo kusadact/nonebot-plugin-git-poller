@@ -107,6 +107,26 @@ def test_archive_builder_removes_archives_for_repo_key(tmp_path: Path):
     assert unrelated.exists()
 
 
+def test_archive_builder_removes_archives_except_active_repo_keys(tmp_path: Path):
+    archive, models = _load_archive_module(tmp_path / "cache")
+    source = tmp_path / "source"
+    source.mkdir()
+    (source / "README.md").write_text("hello", encoding="utf-8")
+    builder = archive.ArchiveBuilder()
+
+    active = builder.build(
+        _payload(models),
+        models.Subscription(url="https://example.test/repo.git", branch="main", schedule="每日04:00"),
+        source,
+    )
+    orphan = builder.archive_dir / "orphan-key-repo-main-deadbeef-x.7z"
+    orphan.write_text("delete", encoding="utf-8")
+
+    assert builder.remove_archives_except({"repo-main-abc"}) == 1
+    assert active.path.exists()
+    assert not orphan.exists()
+
+
 def test_archive_builder_refuses_to_remove_archive_outside_cache(tmp_path: Path):
     archive, _ = _load_archive_module(tmp_path / "cache")
     outside = tmp_path / "outside.7z"
