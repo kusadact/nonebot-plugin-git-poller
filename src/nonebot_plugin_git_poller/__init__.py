@@ -42,6 +42,7 @@ __plugin_meta__ = PluginMetadata(
     homepage="https://github.com/kusadact/nonebot-plugin-git-poller",
     config=Config,
     supported_adapters={"~onebot.v11"},
+    extra={"author": "kusadact <kspz2@hotmail.com>"},
 )
 
 service = GitPollerService(plugin_config)
