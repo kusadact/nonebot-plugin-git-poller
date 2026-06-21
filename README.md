@@ -77,7 +77,7 @@ plugins = ["nonebot_plugin_git_poller"]
 | `git_poller_timezone` | 否 | `Asia/Shanghai` | 定时任务时区。 |
 | `git_poller_proxy` | 否 | 空 | HTTP/HTTPS Git 拉取代理。 |
 | `git_poller_timeout` | 否 | `60.0` | HTTP/HTTPS Git 拉取超时，单位秒。 |
-| `git_poller_archive_password` | 否 | 空 | 全局默认压缩包密码；为空时默认不设置密码。 |
+| `git_poller_archive_password` | 否 | 空 | 全局压缩包密码；为空时不自动加密。 |
 | `git_poller_file_base_url` | 条件 | 空 | 上传压缩包时使用的 NoneBot HTTP 服务根地址；Bot 和 OneBot/NapCat 不在同一个文件系统时必须配置，例如 http://nonebot:8088。 |
 
 ## 指令
@@ -102,12 +102,12 @@ plugins = ["nonebot_plugin_git_poller"]
 ```text
 输入设置数字选项
 1. 修改当前仓库推送抓取时间
-2. 修改当前仓库上传压缩包密码（选择后输入无则清除当前仓库密码回到全局默认）
+2. 修改当前仓库上传压缩包密码（选择后输入无则清除当前仓库密码）
 ```
 
-回复 `1` 后，下一条消息必须是合法定时格式。回复 `2` 后，下一条消息会保存为当前仓库压缩包密码，此时输入 `无` 会清除当前仓库密码并回到全局默认。输入非法会取消。
+回复 `1` 后，下一条消息必须是合法定时格式。回复 `2` 后，下一条消息会保存为当前仓库压缩包密码，此时输入 `无` 会清除当前仓库密码。输入非法会取消。
 
-`/仓库列表` 显示当前群关注的仓库、分支、定时、启用状态、`last_success_sha` 和压缩包密码来源。
+`/仓库列表` 显示当前群关注的仓库 Git 链接、分支、计划时间、SHA 和实际使用的压缩包密码。
 
 `/拉取仓库` 立即拉取当前群已关注的仓库，上传最新的源码压缩包。
 

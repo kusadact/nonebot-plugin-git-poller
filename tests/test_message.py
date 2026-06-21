@@ -192,6 +192,61 @@ def test_build_archive_delivery_text_lists_commits_with_latest_last():
     ]
 
 
+def test_build_subscription_list_text_uses_user_facing_fields_and_passwords():
+    subscriptions = {
+        "repo-key-a": models.Subscription(
+            url="https://github.com/example/repo.git",
+            branch="main",
+            schedule="每日04:00",
+            last_success_sha="oldsha1234567890",
+            archive_password="repo-secret",
+        ),
+        "repo-key-b": models.Subscription(
+            url="https://gitlab.example.com/team/api.git",
+            branch="dev",
+            schedule="周一04:30",
+            last_success_sha=None,
+            archive_password=None,
+        ),
+    }
+
+    text = message.build_subscription_list_text(
+        subscriptions,
+        default_archive_password="global-secret",
+    )
+
+    assert text.splitlines() == [
+        "本群关注的仓库：",
+        "1. Git链接：https://github.com/example/repo.git",
+        "   分支：main",
+        "   计划时间：每日04:00",
+        "   SHA：oldsha12",
+        "   密码：repo-secret",
+        "2. Git链接：https://gitlab.example.com/team/api.git",
+        "   分支：dev",
+        "   计划时间：周一04:30",
+        "   SHA：未记录",
+        "   密码：global-secret",
+    ]
+    assert "key:" not in text
+    assert "archive_password" not in text
+    assert "全局默认" not in text
+
+
+def test_build_subscription_list_text_shows_no_password_without_defaults():
+    text = message.build_subscription_list_text(
+        {
+            "repo-key": models.Subscription(
+                url="https://github.com/example/repo.git",
+                branch="main",
+                schedule="每日04:00",
+            )
+        }
+    )
+
+    assert "密码：无" in text
+
+
 def test_upload_archive_to_group_reports_file_base_url_for_unrecognized_uri():
     bot = _Bot(
         upload_error=_ActionFailed(

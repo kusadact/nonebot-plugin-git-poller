@@ -5,7 +5,7 @@ from nonebot.adapters.onebot.v11 import ActionFailed, Bot, Message, MessageSegme
 
 from .config import Config
 from .file_server import build_archive_download_url
-from .models import UpdatePayload
+from .models import Subscription, UpdatePayload
 
 
 DEFAULT_NODE_USER_ID = 2854196310
@@ -40,6 +40,34 @@ def build_archive_delivery_text(payload: UpdatePayload, archive, *, title: str) 
     for index, commit in enumerate(payload.commits):
         prefix = f"最新{commit.short_sha}" if index == len(payload.commits) - 1 else commit.short_sha
         lines.append(f"{prefix}：{commit.title}")
+    return "\n".join(lines)
+
+
+def build_subscription_list_text(
+    subscriptions: dict[str, Subscription],
+    *,
+    default_archive_password: str | None = None,
+) -> str:
+    lines = ["本群关注的仓库："]
+    default_password = _clean_password(default_archive_password)
+    for index, subscription in enumerate(subscriptions.values(), start=1):
+        last_sha = (
+            subscription.last_success_sha[:8]
+            if subscription.last_success_sha
+            else "未记录"
+        )
+        password = (
+            _clean_password(subscription.archive_password)
+            or default_password
+            or "无"
+        )
+        lines.append(
+            f"{index}. Git链接：{subscription.url}\n"
+            f"   分支：{subscription.branch}\n"
+            f"   计划时间：{subscription.schedule}\n"
+            f"   SHA：{last_sha}\n"
+            f"   密码：{password}"
+        )
     return "\n".join(lines)
 
 
@@ -123,6 +151,13 @@ def _node(content: str, nickname: str) -> MessageSegment:
         nickname=nickname or "Git 更新",
         content=Message(content),
     )
+
+
+def _clean_password(value: str | None) -> str | None:
+    if value is None:
+        return None
+    value = value.strip()
+    return value or None
 
 
 def _is_unrecognized_upload_uri(exc: ActionFailed) -> bool:

@@ -21,6 +21,7 @@ from .file_server import register_archive_file_route
 from .message import (
     ArchiveUploadUriError,
     build_archive_delivery_text,
+    build_subscription_list_text,
     send_update_to_group,
     upload_archive_to_group,
 )
@@ -165,7 +166,7 @@ async def _(
     await matcher.send(
         "输入设置数字选项\n"
         "1. 修改当前仓库推送抓取时间\n"
-        "2. 修改当前仓库上传压缩包密码（选择后输入无则清除当前仓库密码回到全局默认）"
+        "2. 修改当前仓库上传压缩包密码（选择后输入无则清除当前仓库密码）"
     )
 
 
@@ -184,7 +185,7 @@ async def _(
     if choice == "1":
         await matcher.send("请输入新的推送抓取时间，例如：每日04:00、每3天04:00、周一04:00")
     else:
-        await matcher.send("请输入新的压缩包密码。输入 无 则清除当前仓库密码回到全局默认。")
+        await matcher.send("请输入新的压缩包密码。输入 无 则清除当前仓库密码。")
 
 
 @configure_repo.got("setting_value")
@@ -235,7 +236,7 @@ async def _(
     except Exception as exc:
         logger.exception("git poller archive password setting failed")
         await matcher.finish(f"输入非法，已取消设置：{exc}")
-    status = "回到全局默认" if subscription.archive_password is None else "已设置当前仓库密码"
+    status = "已清除当前仓库密码" if subscription.archive_password is None else "已设置当前仓库密码"
     await matcher.finish(
         f"设置成功：{identity.display_name}\n"
         f"分支：{subscription.branch}\n"
@@ -248,19 +249,12 @@ async def _(event: GroupMessageEvent, matcher: Matcher) -> None:
     subscriptions = service.list_group_subscriptions(int(event.group_id))
     if not subscriptions:
         await matcher.finish("本群还没有关注任何仓库。")
-    lines = ["本群关注的仓库："]
-    for index, (repo_key, subscription) in enumerate(subscriptions.items(), start=1):
-        status = "启用" if subscription.enabled else "停用"
-        last_sha = subscription.last_success_sha[:8] if subscription.last_success_sha else "未记录"
-        password_status = "仓库密码" if subscription.archive_password else "全局默认"
-        lines.append(
-            f"{index}. {subscription.url}\n"
-            f"   key: {repo_key}\n"
-            f"   branch: {subscription.branch} / schedule: {subscription.schedule} / {status}\n"
-            f"   last_success_sha: {last_sha}\n"
-            f"   archive_password: {password_status}"
+    await matcher.finish(
+        build_subscription_list_text(
+            subscriptions,
+            default_archive_password=plugin_config.git_poller_archive_password,
         )
-    await matcher.finish("\n".join(lines))
+    )
 
 
 @pull_repo.handle()
