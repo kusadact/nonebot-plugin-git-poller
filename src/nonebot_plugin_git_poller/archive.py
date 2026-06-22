@@ -47,7 +47,7 @@ class ArchiveBuilder:
         return ArchiveFile(
             path=archive_path,
             name=archive_name,
-            sha256=_sha256_file(archive_path),
+            sha256=sha256_file(archive_path),
             password=password,
             password_used=password is not None,
         )
@@ -137,7 +137,7 @@ def _clean_password(value: str | None) -> str | None:
     return cleaned or None
 
 
-def _sha256_file(path: Path) -> str:
+def sha256_file(path: Path) -> str:
     digest = hashlib.sha256()
     with path.open("rb") as file:
         for chunk in iter(lambda: file.read(1024 * 1024), b""):

@@ -1,14 +1,22 @@
 from __future__ import annotations
 
+import base64
+from math import ceil
+from pathlib import Path
+from uuid import uuid4
+
 from nonebot import logger
 from nonebot.adapters.onebot.v11 import ActionFailed, Bot, Message, MessageSegment
 
+from .archive import sha256_file
 from .config import Config
 from .file_server import build_archive_download_url
 from .models import Subscription, UpdatePayload
 
 
 DEFAULT_NODE_USER_ID = 2854196310
+NAPCAT_STREAM_CHUNK_SIZE = 1024 * 1024
+NAPCAT_STREAM_FILE_RETENTION_BUFFER_SECONDS = 600
 ARCHIVE_UPLOAD_URI_ERROR_MESSAGE = (
     "上传压缩包失败：OneBot 无法识别文件地址，"
     "请检查 git_poller_file_base_url 是否正确。"
@@ -17,6 +25,13 @@ ARCHIVE_UPLOAD_URI_ERROR_MESSAGE = (
 
 class ArchiveUploadUriError(RuntimeError):
     pass
+
+
+class NapCatStreamUploadError(RuntimeError):
+    pass
+
+
+_napcat_detection_cache: dict[str, bool] = {}
 
 
 def build_forward_nodes(payload: UpdatePayload) -> list[MessageSegment]:
@@ -88,6 +103,26 @@ async def upload_archive_to_group(
     *,
     config: Config,
 ) -> None:
+    if await _is_napcat_bot(bot):
+        try:
+            await _upload_archive_to_napcat_group(bot, group_id, archive, config=config)
+            return
+        except NapCatStreamUploadError:
+            logger.exception(
+                f"git poller NapCat stream upload failed before group upload; "
+                f"falling back to generic upload: group={group_id}, name={archive.name}"
+            )
+
+    await _upload_archive_to_group_generic(bot, group_id, archive, config=config)
+
+
+async def _upload_archive_to_group_generic(
+    bot: Bot,
+    group_id: int,
+    archive,
+    *,
+    config: Config,
+) -> None:
     upload_file = build_archive_download_url(archive.path, config)
     if upload_file:
         logger.info(
@@ -100,15 +135,17 @@ async def upload_archive_to_group(
             "git_poller_file_base_url is not configured; falling back to local archive path. "
             "This only works when the OneBot implementation can read the same filesystem."
         )
+    password_used = getattr(archive, "password_used", False)
     logger.info(
         f"git poller uploading archive to group {group_id}: "
-        f"name={archive.name}, password={archive.password_used}, file={upload_file}"
+        f"name={archive.name}, password={password_used}, file={upload_file}"
     )
     try:
         await bot.upload_group_file(
             group_id=int(group_id),
             file=upload_file,
             name=archive.name,
+            _timeout=config.git_poller_upload_api_timeout,
         )
     except ActionFailed as exc:
         if _is_unrecognized_upload_uri(exc):
@@ -116,6 +153,141 @@ async def upload_archive_to_group(
         raise
     logger.info(f"git poller archive uploaded to group {group_id}: {archive.name}")
 
+
+async def _upload_archive_to_napcat_group(
+    bot: Bot,
+    group_id: int,
+    archive,
+    *,
+    config: Config,
+) -> None:
+    password_used = getattr(archive, "password_used", False)
+    logger.info(
+        f"git poller uploading archive to NapCat stream for group {group_id}: "
+        f"name={archive.name}, password={password_used}, file={archive.path}"
+    )
+    stream_file_path = await _upload_file_to_napcat_stream(
+        bot,
+        Path(archive.path),
+        archive.name,
+        config,
+        expected_sha256=getattr(archive, "sha256", None),
+    )
+    logger.info(
+        f"git poller NapCat stream upload complete for group {group_id}: "
+        f"name={archive.name}, file={stream_file_path}"
+    )
+    await bot.upload_group_file(
+        group_id=int(group_id),
+        file=stream_file_path,
+        name=archive.name,
+        _timeout=config.git_poller_upload_api_timeout,
+    )
+    logger.info(f"git poller archive uploaded to group {group_id}: {archive.name}")
+
+
+async def _upload_file_to_napcat_stream(
+    bot: Bot,
+    path: Path,
+    filename: str,
+    config: Config,
+    *,
+    expected_sha256: str | None = None,
+) -> str:
+    if not path.is_file():
+        raise NapCatStreamUploadError(f"archive file does not exist: {path}")
+
+    file_size = path.stat().st_size
+    total_chunks = max(1, ceil(file_size / NAPCAT_STREAM_CHUNK_SIZE))
+    stream_id = f"git-poller-{uuid4().hex}"
+    expected_sha256 = expected_sha256 or sha256_file(path)
+    file_retention_ms = int(
+        (config.git_poller_upload_api_timeout + NAPCAT_STREAM_FILE_RETENTION_BUFFER_SECONDS)
+        * 1000
+    )
+
+    try:
+        await bot.call_api(
+            "upload_file_stream",
+            stream_id=stream_id,
+            total_chunks=total_chunks,
+            file_size=file_size,
+            filename=filename,
+            expected_sha256=expected_sha256,
+            file_retention=file_retention_ms,
+            _timeout=config.git_poller_upload_api_timeout,
+        )
+        with path.open("rb") as file:
+            for chunk_index in range(total_chunks):
+                chunk = file.read(NAPCAT_STREAM_CHUNK_SIZE)
+                if not chunk and file_size:
+                    raise NapCatStreamUploadError(
+                        f"archive stream ended early: {path}, chunk={chunk_index}"
+                    )
+                await bot.call_api(
+                    "upload_file_stream",
+                    stream_id=stream_id,
+                    chunk_index=chunk_index,
+                    chunk_data=base64.b64encode(chunk).decode("ascii"),
+                    _timeout=config.git_poller_upload_api_timeout,
+                )
+        response = await bot.call_api(
+            "upload_file_stream",
+            stream_id=stream_id,
+            is_complete=True,
+            _timeout=config.git_poller_upload_api_timeout,
+        )
+    except NapCatStreamUploadError:
+        await _reset_napcat_stream(bot, stream_id, config)
+        raise
+    except Exception as exc:
+        await _reset_napcat_stream(bot, stream_id, config)
+        raise NapCatStreamUploadError(str(exc)) from exc
+
+    file_path = _extract_napcat_stream_file_path(response)
+    if not file_path:
+        raise NapCatStreamUploadError(f"NapCat stream response has no file_path: {response!r}")
+    return file_path
+
+
+async def _reset_napcat_stream(bot: Bot, stream_id: str, config: Config) -> None:
+    try:
+        await bot.call_api(
+            "upload_file_stream",
+            stream_id=stream_id,
+            reset=True,
+            _timeout=config.git_poller_upload_api_timeout,
+        )
+    except Exception:
+        logger.debug(f"git poller NapCat stream reset failed: stream={stream_id}")
+
+
+def _extract_napcat_stream_file_path(response) -> str | None:
+    if isinstance(response, dict):
+        file_path = response.get("file_path")
+        return str(file_path) if file_path else None
+    return None
+
+
+async def _is_napcat_bot(bot: Bot) -> bool:
+    self_id = getattr(bot, "self_id", None)
+    if self_id is None:
+        logger.debug("git poller skipped NapCat detection without bot self_id")
+        return False
+    cache_key = str(self_id)
+    if cache_key in _napcat_detection_cache:
+        return _napcat_detection_cache[cache_key]
+    try:
+        info = await bot.get_version_info()
+    except Exception:
+        logger.debug("git poller failed to detect OneBot implementation")
+        return False
+    app_name = str(info.get("app_name", "") if isinstance(info, dict) else "").lower()
+    result = "napcat" in app_name
+    _napcat_detection_cache[cache_key] = result
+    if result:
+        logger.info(f"git poller detected NapCat OneBot implementation: {info}")
+    return result
 
 def _summary_text(payload: UpdatePayload) -> str:
     items = [

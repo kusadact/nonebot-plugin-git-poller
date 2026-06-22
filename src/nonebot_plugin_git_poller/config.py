@@ -10,6 +10,7 @@ class Config(BaseModel):
 
     git_poller_proxy: str | None = None
     git_poller_timeout: float = Field(default=60.0, gt=0)
+    git_poller_upload_api_timeout: float = Field(default=3600.0, gt=0)
     git_poller_archive_password: str | None = None
     git_poller_file_base_url: str | None = None
 

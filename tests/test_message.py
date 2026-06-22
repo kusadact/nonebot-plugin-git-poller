@@ -14,6 +14,7 @@ nonebot_module.logger = SimpleNamespace(
     debug=lambda *args, **kwargs: None,
     info=lambda *args, **kwargs: None,
     warning=lambda *args, **kwargs: None,
+    exception=lambda *args, **kwargs: None,
 )
 nonebot_module.get_plugin_config = lambda config_cls: config_cls()
 nonebot_module.get_driver = lambda: SimpleNamespace()
@@ -51,9 +52,21 @@ message = load_plugin_module("message")
 
 
 class _Bot:
-    def __init__(self, upload_error: Exception | None = None) -> None:
+    _next_id = 0
+
+    def __init__(
+        self,
+        upload_error: Exception | None = None,
+        *,
+        version_info: dict[str, object] | Exception | None = None,
+        stream_complete: dict[str, object] | Exception | None = None,
+    ) -> None:
         self.calls: list[tuple[str, dict[str, object]]] = []
         self.upload_error = upload_error
+        self.version_info = version_info
+        self.stream_complete = stream_complete or {"file_path": "/napcat/temp/repo.7z"}
+        type(self)._next_id += 1
+        self.self_id = f"bot-{type(self)._next_id}"
 
     async def send_group_forward_msg(self, **kwargs: object) -> None:
         self.calls.append(("send_group_forward_msg", kwargs))
@@ -62,6 +75,20 @@ class _Bot:
         if self.upload_error is not None:
             raise self.upload_error
         self.calls.append(("upload_group_file", kwargs))
+
+    async def get_version_info(self) -> dict[str, object]:
+        self.calls.append(("get_version_info", {}))
+        if isinstance(self.version_info, Exception):
+            raise self.version_info
+        return self.version_info or {"app_name": "Generic.OneBot"}
+
+    async def call_api(self, api: str, **kwargs: object):
+        self.calls.append((api, kwargs))
+        if api == "upload_file_stream" and kwargs.get("is_complete"):
+            if isinstance(self.stream_complete, Exception):
+                raise self.stream_complete
+            return self.stream_complete
+        return {"status": "ok"}
 
 
 def _payload():
@@ -99,6 +126,7 @@ def _payload():
 def _config(**overrides):
     values = {
         "git_poller_file_base_url": None,
+        "git_poller_upload_api_timeout": 3600.0,
     }
     values.update(overrides)
     return SimpleNamespace(**values)
@@ -133,15 +161,16 @@ def test_upload_archive_to_group_uses_group_file_api():
         name="repo.7z",
         sha256="0" * 64,
         password=None,
-        password_used=False,
     )
 
     asyncio.run(message.upload_archive_to_group(bot, 10001, archive, config=_config()))
 
-    assert bot.calls[0][0] == "upload_group_file"
-    assert bot.calls[0][1]["group_id"] == 10001
-    assert bot.calls[0][1]["file"] == "/tmp/repo.7z"
-    assert bot.calls[0][1]["name"] == "repo.7z"
+    assert bot.calls[0][0] == "get_version_info"
+    assert bot.calls[1][0] == "upload_group_file"
+    assert bot.calls[1][1]["group_id"] == 10001
+    assert bot.calls[1][1]["file"] == "/tmp/repo.7z"
+    assert bot.calls[1][1]["name"] == "repo.7z"
+    assert bot.calls[1][1]["_timeout"] == 3600.0
 
 
 def test_upload_archive_to_group_uses_file_base_url():
@@ -163,15 +192,163 @@ def test_upload_archive_to_group_uses_file_base_url():
         )
     )
 
-    assert bot.calls[0][0] == "upload_group_file"
-    parsed = urlparse(str(bot.calls[0][1]["file"]))
+    assert bot.calls[0][0] == "get_version_info"
+    assert bot.calls[1][0] == "upload_group_file"
+    parsed = urlparse(str(bot.calls[1][1]["file"]))
     query = parse_qs(parsed.query)
     assert parsed.scheme == "http"
     assert parsed.netloc == "127.0.0.1:8080"
     assert parsed.path == "/git-poller/files/repo%20main.7z"
     assert "expires" in query
     assert "token" in query
-    assert bot.calls[0][1]["name"] == "repo-main.7z"
+    assert bot.calls[1][1]["name"] == "repo-main.7z"
+    assert bot.calls[1][1]["_timeout"] == 3600.0
+
+
+def test_upload_archive_to_group_uses_napcat_stream_api(tmp_path: Path, monkeypatch):
+    bot = _Bot(
+        version_info={"app_name": "NapCat.Onebot", "app_version": "test"},
+        stream_complete={"file_path": "/app/.config/QQ/NapCat/temp/repo-main.7z"},
+    )
+    archive_path = tmp_path / "repo-main.7z"
+    archive_path.write_bytes(b"abcdef")
+    archive = SimpleNamespace(
+        path=archive_path,
+        name="repo-main.7z",
+        sha256="0" * 64,
+        password=None,
+    )
+    monkeypatch.setattr(message, "NAPCAT_STREAM_CHUNK_SIZE", 2)
+    message._napcat_detection_cache.clear()
+
+    asyncio.run(message.upload_archive_to_group(bot, 10001, archive, config=_config()))
+
+    assert [call[0] for call in bot.calls] == [
+        "get_version_info",
+        "upload_file_stream",
+        "upload_file_stream",
+        "upload_file_stream",
+        "upload_file_stream",
+        "upload_file_stream",
+        "upload_group_file",
+    ]
+    init_call = bot.calls[1][1]
+    assert init_call["total_chunks"] == 3
+    assert init_call["file_size"] == 6
+    assert init_call["filename"] == "repo-main.7z"
+    assert init_call["expected_sha256"] == "0" * 64
+    assert init_call["file_retention"] == 4200000
+    assert init_call["_timeout"] == 3600.0
+    chunk_calls = [call[1] for call in bot.calls[2:5]]
+    assert [call["chunk_index"] for call in chunk_calls] == [0, 1, 2]
+    assert all(call["_timeout"] == 3600.0 for call in chunk_calls)
+    assert bot.calls[5][1]["is_complete"] is True
+    assert bot.calls[6][1]["file"] == "/app/.config/QQ/NapCat/temp/repo-main.7z"
+    assert bot.calls[6][1]["name"] == "repo-main.7z"
+    assert bot.calls[6][1]["_timeout"] == 3600.0
+
+
+def test_upload_archive_to_group_falls_back_when_napcat_stream_completion_fails(
+    tmp_path: Path,
+):
+    bot = _Bot(
+        version_info={"app_name": "NapCat.Onebot"},
+        stream_complete=RuntimeError("stream failed"),
+    )
+    archive_path = tmp_path / "repo.7z"
+    archive_path.write_bytes(b"archive")
+    archive = SimpleNamespace(
+        path=archive_path,
+        name="repo.7z",
+        sha256="0" * 64,
+        password=None,
+        password_used=False,
+    )
+    message._napcat_detection_cache.clear()
+
+    asyncio.run(message.upload_archive_to_group(bot, 10001, archive, config=_config()))
+
+    assert any(call[0] == "upload_file_stream" for call in bot.calls)
+    upload_calls = [call for call in bot.calls if call[0] == "upload_group_file"]
+    assert upload_calls[-1][1]["file"] == str(archive_path)
+    assert upload_calls[-1][1]["_timeout"] == 3600.0
+
+
+def test_upload_archive_to_group_does_not_reset_completed_napcat_stream_without_file_path(
+    tmp_path: Path,
+):
+    bot = _Bot(
+        version_info={"app_name": "NapCat.Onebot"},
+        stream_complete={"status": "ok"},
+    )
+    archive_path = tmp_path / "repo.7z"
+    archive_path.write_bytes(b"archive")
+    archive = SimpleNamespace(
+        path=archive_path,
+        name="repo.7z",
+        sha256="0" * 64,
+        password=None,
+    )
+    message._napcat_detection_cache.clear()
+
+    asyncio.run(message.upload_archive_to_group(bot, 10001, archive, config=_config()))
+
+    assert not any(
+        call[0] == "upload_file_stream" and call[1].get("reset")
+        for call in bot.calls
+    )
+    upload_calls = [call for call in bot.calls if call[0] == "upload_group_file"]
+    assert upload_calls[-1][1]["file"] == str(archive_path)
+
+
+def test_upload_file_to_napcat_stream_reraises_stream_errors(tmp_path: Path):
+    archive_path = tmp_path / "repo.7z"
+    archive_path.write_bytes(b"archive")
+    original = message.NapCatStreamUploadError("stream ended early")
+
+    class _StreamErrorBot:
+        def __init__(self) -> None:
+            self.calls: list[tuple[str, dict[str, object]]] = []
+
+        async def call_api(self, api: str, **kwargs: object):
+            self.calls.append((api, kwargs))
+            if kwargs.get("reset"):
+                return {"status": "ok"}
+            raise original
+
+    bot = _StreamErrorBot()
+
+    try:
+        asyncio.run(
+            message._upload_file_to_napcat_stream(
+                bot,
+                archive_path,
+                "repo.7z",
+                _config(),
+                expected_sha256="0" * 64,
+            )
+        )
+    except message.NapCatStreamUploadError as exc:
+        assert exc is original
+        assert exc.__cause__ is None
+    else:
+        raise AssertionError("stream upload should fail")
+
+    assert any(
+        call[0] == "upload_file_stream" and call[1].get("reset")
+        for call in bot.calls
+    )
+
+
+def test_is_napcat_bot_without_self_id_returns_false():
+    class _NoSelfIdBot:
+        async def get_version_info(self):
+            raise AssertionError("self_id-less bot should not be queried")
+
+    message._napcat_detection_cache.clear()
+
+    assert asyncio.run(message._is_napcat_bot(_NoSelfIdBot())) is False
+    assert message._napcat_detection_cache == {}
 
 
 def test_build_archive_delivery_text_lists_commits_with_latest_last():

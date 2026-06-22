@@ -42,5 +42,6 @@ def test_config_defaults_are_global_only():
     assert config.git_poller_timezone == "Asia/Shanghai"
     assert config.git_poller_proxy is None
     assert config.git_poller_timeout == 60.0
+    assert config.git_poller_upload_api_timeout == 3600.0
     assert config.git_poller_archive_password is None
     assert config.git_poller_file_base_url is None

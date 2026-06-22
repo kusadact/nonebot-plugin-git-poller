@@ -77,8 +77,9 @@ plugins = ["nonebot_plugin_git_poller"]
 | `git_poller_timezone` | 否 | `Asia/Shanghai` | 定时任务时区。 |
 | `git_poller_proxy` | 否 | 空 | HTTP/HTTPS Git 拉取代理。 |
 | `git_poller_timeout` | 否 | `60.0` | HTTP/HTTPS Git 拉取超时，单位秒。 |
+| `git_poller_upload_api_timeout` | 否 | `3600.0` | 调用 OneBot 上传压缩包 API 的超时，单位秒。 |
 | `git_poller_archive_password` | 否 | 空 | 全局压缩包密码；为空时不自动加密。 |
-| `git_poller_file_base_url` | 条件 | 空 | 上传压缩包时使用的 NoneBot HTTP 服务根地址；Bot 和 OneBot/NapCat 不在同一个文件系统时必须配置，例如 http://nonebot:8088。 |
+| `git_poller_file_base_url` | 条件 | 空 | 上传压缩包时使用的 NoneBot HTTP 服务根地址；非 NapCat OneBot 和 Bot 不在同一个文件系统时必须配置，例如 http://nonebot:8088。检测到 NapCat 时会优先使用 NapCat Stream API 上传本地文件，可不配置。 |
 
 ## 指令
 
