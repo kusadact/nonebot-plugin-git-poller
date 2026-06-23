@@ -1,6 +1,6 @@
 [project]
 name = "nonebot-plugin-git-poller"
-version = "0.1.9"
+version = "0.1.10"
 description = "按群订阅 Git 仓库更新的 NoneBot2 插件，支持多仓库、多分支定时拉取"
 authors = [
     {name = "kusadact", email = "kspz2@hotmail.com"},

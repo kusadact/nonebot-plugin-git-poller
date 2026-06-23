@@ -351,7 +351,7 @@ def test_is_napcat_bot_without_self_id_returns_false():
     assert message._napcat_detection_cache == {}
 
 
-def test_build_archive_delivery_text_lists_commits_with_latest_last():
+def test_build_archive_delivery_text_lists_commits_newest_first():
     archive = SimpleNamespace(
         sha256="f" * 64,
         password="secret",
@@ -364,8 +364,9 @@ def test_build_archive_delivery_text_lists_commits_with_latest_last():
         "分支：main",
         f"sha256：{'f' * 64}",
         "密码：secret",
+        "近期更新记录（由新到旧排列）：",
+        "newsha12：Add feature",
         "midsha12：Prepare feature",
-        "最新newsha12：Add feature",
     ]
 
 

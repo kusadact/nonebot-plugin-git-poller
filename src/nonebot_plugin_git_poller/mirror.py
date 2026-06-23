@@ -5,7 +5,6 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 import shutil
 from threading import RLock
-from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from nonebot import logger
 
@@ -20,6 +19,7 @@ from .repository import (
     normalize_branch,
     normalize_repo_url,
 )
+from .schedule import parse_utc_offset
 from .state import StateStore
 
 
@@ -478,8 +478,6 @@ class GitPollerService:
 
 def _now_iso(timezone_name: str | None = None) -> str:
     if timezone_name:
-        try:
-            return datetime.now(ZoneInfo(timezone_name)).isoformat(timespec="seconds")
-        except ZoneInfoNotFoundError:
-            logger.warning(f"git poller fell back to local timezone for timestamps: {timezone_name!r}")
+        parsed_timezone, _ = parse_utc_offset(timezone_name)
+        return datetime.now(parsed_timezone).isoformat(timespec="seconds")
     return datetime.now(timezone.utc).astimezone().isoformat(timespec="seconds")

@@ -814,7 +814,7 @@ wheels = [
 
 [[package]]
 name = "nonebot-plugin-git-poller"
-version = "0.1.9"
+version = "0.1.10"
 source = { editable = "." }
 dependencies = [
     { name = "dulwich" },

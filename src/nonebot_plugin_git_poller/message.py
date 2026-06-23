@@ -47,14 +47,14 @@ def build_archive_delivery_text(payload: UpdatePayload, archive, *, title: str) 
         f"分支：{payload.branch}",
         f"sha256：{archive.sha256}",
         f"密码：{archive.password or '无'}",
+        "近期更新记录（由新到旧排列）：",
     ]
     if not payload.commits:
         lines.append("无新增 commit")
         return "\n".join(lines)
 
-    for index, commit in enumerate(payload.commits):
-        prefix = f"最新{commit.short_sha}" if index == len(payload.commits) - 1 else commit.short_sha
-        lines.append(f"{prefix}：{commit.title}")
+    for commit in reversed(payload.commits):
+        lines.append(f"{commit.short_sha}：{commit.title}")
     return "\n".join(lines)
 
 

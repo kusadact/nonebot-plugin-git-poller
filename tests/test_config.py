@@ -39,7 +39,7 @@ def test_config_defaults_are_global_only():
     config = _load_config_module().Config()
 
     assert config.git_poller_default_schedule == "每日04:00"
-    assert config.git_poller_timezone == "Asia/Shanghai"
+    assert config.git_poller_timezone == "+8"
     assert config.git_poller_proxy is None
     assert config.git_poller_timeout == 60.0
     assert config.git_poller_upload_api_timeout == 3600.0

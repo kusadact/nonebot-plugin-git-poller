@@ -3,7 +3,7 @@
     <img src="https://raw.githubusercontent.com/fllesser/nonebot-plugin-template/refs/heads/resource/.docs/NoneBotPlugin.svg" width="310" alt="logo">
   </a>
 
-## nonebot-plugin-git-poller
+## ✨ nonebot-plugin-git-poller ✨
 
 [![LICENSE](https://img.shields.io/github/license/kusadact/nonebot-plugin-git-poller.svg)](./LICENSE)
 [![pypi](https://img.shields.io/pypi/v/nonebot-plugin-git-poller.svg)](https://pypi.org/project/nonebot-plugin-git-poller/)
@@ -17,7 +17,7 @@
 
 支持 GitHub、GitLab、Gitee 以及自建 Git 服务等主流 Git 托管平台，兼容标准 HTTP/HTTPS Git 远端。
 
-## 安装
+## 💿 安装
 
 <details open>
 <summary>使用 nb-cli 安装</summary>
@@ -69,19 +69,19 @@ plugins = ["nonebot_plugin_git_poller"]
 
 </details>
 
-## 配置
+## ⚙️ 配置
 
 | 配置项 | 必填 | 默认值 | 说明 |
 | --- | --- | --- | --- |
 | `git_poller_default_schedule` | 否 | `每日04:00` | 新关注仓库的默认定时规则；留空关闭默认定时注册。 |
-| `git_poller_timezone` | 否 | `Asia/Shanghai` | 定时任务时区。 |
+| `git_poller_timezone` | 否 | `+8` | 定时任务 UTC 偏移量，含半点时区，例如 `+8.5` 或 `-3.5`。 |
 | `git_poller_proxy` | 否 | 空 | HTTP/HTTPS Git 拉取代理。 |
 | `git_poller_timeout` | 否 | `60.0` | HTTP/HTTPS Git 拉取超时，单位秒。 |
 | `git_poller_upload_api_timeout` | 否 | `3600.0` | 调用 OneBot 上传压缩包 API 的超时，单位秒。 |
 | `git_poller_archive_password` | 否 | 空 | 全局压缩包密码；为空时不自动加密。 |
-| `git_poller_file_base_url` | 条件 | 空 | 上传压缩包时使用的 NoneBot HTTP 服务根地址；非 NapCat OneBot 和 Bot 不在同一个文件系统时必须配置，例如 http://nonebot:8088。检测到 NapCat 时会优先使用 NapCat Stream API 上传本地文件，可不配置。 |
+| `git_poller_file_base_url` | 条件 | 空 | 上传文件使用的 NoneBot HTTP 服务根地址；Bot 和 协议端 不在同一个文件系统时必须配置，例如 http://nonebot:8088。`NapCat` 协议端在 v4.8.115 起支持直接传输，无需配置此项。 |
 
-## 指令
+## 🎉 指令
 
 ```text
 /关注仓库 仓库url [--分支名]
@@ -108,20 +108,24 @@ plugins = ["nonebot_plugin_git_poller"]
 
 回复 `1` 后，下一条消息必须是合法定时格式。回复 `2` 后，下一条消息会保存为当前仓库压缩包密码，此时输入 `无` 会清除当前仓库密码。输入非法会取消。
 
-`/仓库列表` 显示当前群关注的仓库 Git 链接、分支、计划时间、SHA 和实际使用的压缩包密码。
-
-`/拉取仓库` 立即拉取当前群已关注的仓库，上传最新的源码压缩包。
-
-`/仓库摘要` 仅拉取远端并展示本群记录与远端 HEAD 的差异。
-
-## 定时格式
-
-支持：
-
 ```text
+定时格式
+
 每日hh:mm
 每x天hh:mm
 周xhh:mm
 ```
 
 `每x天` 的 `x` 使用 1 到 30 的整数；`周x` 只支持汉字 `一二三四五六日/天`
+
+`/仓库列表` 显示当前群关注的仓库 Git 链接、分支、计划时间、SHA 和实际使用的压缩包密码。
+
+`/拉取仓库` 立即拉取当前群已关注的仓库，上传最新的源码压缩包。
+
+`/仓库摘要` 仅拉取远端并展示本群记录与远端 HEAD 的差异。
+
+## ⚠️ 注意事项
+
+使用 NapCat 上传较大的仓库压缩包时，如果 Bot 宿主机实际上传速度较慢，可能会出现“文件最终发送成功，但 NapCat API 先返回超时错误”的情况。这是 NapCat 在等待 QQNT 的发送回执时超时导致的伪超时，会导致本插件无法正常使用。
+
+`NapCat` 在 v4.17.49 起提供了上传/下载超时预测配置。若遇到此类情况，请在 NapCat WebUI 的 OneBot 配置中自行调整： `预估上传速度(KB/s)` 或 `最大超时时间(毫秒)` 。

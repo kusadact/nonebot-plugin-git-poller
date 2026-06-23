@@ -198,7 +198,7 @@ def _service(
 def _config(**overrides):
     values = {
         "git_poller_default_schedule": "每日04:00",
-        "git_poller_timezone": "Asia/Shanghai",
+        "git_poller_timezone": "8",
         "git_poller_proxy": None,
         "git_poller_timeout": 60.0,
         "git_poller_archive_password": None,
