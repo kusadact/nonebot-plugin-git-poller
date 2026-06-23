@@ -79,7 +79,7 @@ plugins = ["nonebot_plugin_git_poller"]
 | `git_poller_timeout` | 否 | `60.0` | HTTP/HTTPS Git 拉取超时，单位秒。 |
 | `git_poller_upload_api_timeout` | 否 | `3600.0` | 调用 OneBot 上传压缩包 API 的超时，单位秒。 |
 | `git_poller_archive_password` | 否 | 空 | 全局压缩包密码；为空时不自动加密。 |
-| `git_poller_file_base_url` | 条件 | 空 | 上传文件使用的 NoneBot HTTP 服务根地址；Bot 和 协议端 不在同一个文件系统时必须配置，例如 http://nonebot:8088。`NapCat` 协议端在 v4.8.115 起支持直接传输，无需配置此项。 |
+| `git_poller_file_base_url` | 条件 | 空 | 上传文件使用的 NoneBot HTTP 服务根地址；Bot 和 协议端 不在同一个文件系统时必须配置，例如 http://nonebot:8088 。`NapCat` 协议端在 v4.8.115 起支持直接传输，无需配置此项。 |
 
 ## 🎉 指令
 
