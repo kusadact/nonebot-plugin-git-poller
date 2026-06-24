@@ -375,7 +375,7 @@ def test_build_subscription_list_text_uses_user_facing_fields_and_passwords():
         "repo-key-a": models.Subscription(
             url="https://github.com/example/repo.git",
             branch="main",
-            schedule="每日04:00",
+            schedule="每天04:00",
             last_success_sha="oldsha1234567890",
             archive_password="repo-secret",
         ),
@@ -397,7 +397,7 @@ def test_build_subscription_list_text_uses_user_facing_fields_and_passwords():
         "本群关注的仓库：",
         "1. Git链接：https://github.com/example/repo.git",
         "   分支：main",
-        "   计划时间：每日04:00",
+        "   计划时间：每天04:00",
         "   SHA：oldsha12",
         "   密码：repo-secret",
         "2. Git链接：https://gitlab.example.com/team/api.git",
@@ -417,7 +417,7 @@ def test_build_subscription_list_text_shows_no_password_without_defaults():
             "repo-key": models.Subscription(
                 url="https://github.com/example/repo.git",
                 branch="main",
-                schedule="每日04:00",
+                schedule="每天04:00",
             )
         }
     )

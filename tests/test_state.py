@@ -47,7 +47,7 @@ def test_subscriptions_are_group_and_repo_scoped(tmp_path: Path):
     store.upsert_subscription(
         10001,
         "repo-a",
-        models.Subscription(url="https://example.test/a.git", branch="main", schedule="每日04:00"),
+        models.Subscription(url="https://example.test/a.git", branch="main", schedule="每天04:00"),
     )
     store.upsert_subscription(
         10001,
@@ -57,7 +57,7 @@ def test_subscriptions_are_group_and_repo_scoped(tmp_path: Path):
     store.upsert_subscription(
         10002,
         "repo-a",
-        models.Subscription(url="https://example.test/a.git", branch="main", schedule="每日04:00"),
+        models.Subscription(url="https://example.test/a.git", branch="main", schedule="每天04:00"),
     )
 
     group_one = store.list_group_subscriptions(10001)
@@ -74,12 +74,12 @@ def test_update_last_success_only_changes_target_subscription(tmp_path: Path):
     store.upsert_subscription(
         10001,
         "repo-a",
-        models.Subscription(url="https://example.test/a.git", branch="main", schedule="每日04:00"),
+        models.Subscription(url="https://example.test/a.git", branch="main", schedule="每天04:00"),
     )
     store.upsert_subscription(
         10001,
         "repo-b",
-        models.Subscription(url="https://example.test/b.git", branch="main", schedule="每日04:00"),
+        models.Subscription(url="https://example.test/b.git", branch="main", schedule="每天04:00"),
     )
 
     store.update_last_success(10001, "repo-a", "abc123", "2026-06-20T04:00:00+08:00")
@@ -94,12 +94,12 @@ def test_update_last_archive_path_only_changes_target_subscription(tmp_path: Pat
     store.upsert_subscription(
         10001,
         "repo-a",
-        models.Subscription(url="https://example.test/a.git", branch="main", schedule="每日04:00"),
+        models.Subscription(url="https://example.test/a.git", branch="main", schedule="每天04:00"),
     )
     store.upsert_subscription(
         10001,
         "repo-b",
-        models.Subscription(url="https://example.test/b.git", branch="main", schedule="每日04:00"),
+        models.Subscription(url="https://example.test/b.git", branch="main", schedule="每天04:00"),
     )
 
     store.update_last_archive_path(
@@ -119,7 +119,7 @@ def test_update_schedule_and_archive_password(tmp_path: Path):
     store.upsert_subscription(
         10001,
         "repo-a",
-        models.Subscription(url="https://example.test/a.git", branch="main", schedule="每日04:00"),
+        models.Subscription(url="https://example.test/a.git", branch="main", schedule="每天04:00"),
     )
 
     store.update_schedule(10001, "repo-a", "周一04:30", "2026-06-20T04:00:00+08:00")
@@ -140,7 +140,7 @@ def test_subscriptions_for_schedule_filters_enabled_entries(tmp_path: Path):
     store.upsert_subscription(
         10001,
         "repo-a",
-        models.Subscription(url="https://example.test/a.git", branch="main", schedule="每日04:00"),
+        models.Subscription(url="https://example.test/a.git", branch="main", schedule="每天04:00"),
     )
     store.upsert_subscription(
         10001,
@@ -148,7 +148,7 @@ def test_subscriptions_for_schedule_filters_enabled_entries(tmp_path: Path):
         models.Subscription(
             url="https://example.test/b.git",
             branch="main",
-            schedule="每日04:00",
+            schedule="每天04:00",
             enabled=False,
         ),
     )
@@ -158,7 +158,7 @@ def test_subscriptions_for_schedule_filters_enabled_entries(tmp_path: Path):
         models.Subscription(url="https://example.test/c.git", branch="main", schedule="周一04:30"),
     )
 
-    matches = store.subscriptions_for_schedule("每日04:00")
+    matches = store.subscriptions_for_schedule("每天04:00")
 
     assert [(group_id, repo_key) for group_id, repo_key, _ in matches] == [
         (10001, "repo-a")
@@ -171,7 +171,7 @@ def test_is_repo_key_subscribed_checks_all_groups(tmp_path: Path):
     store.upsert_subscription(
         10002,
         "repo-a",
-        models.Subscription(url="https://example.test/a.git", branch="main", schedule="每日04:00"),
+        models.Subscription(url="https://example.test/a.git", branch="main", schedule="每天04:00"),
     )
 
     assert store.is_repo_key_subscribed("repo-a") is True

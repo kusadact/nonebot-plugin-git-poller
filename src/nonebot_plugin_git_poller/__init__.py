@@ -183,7 +183,7 @@ async def _(
         await matcher.finish("输入非法，已取消设置。")
     matcher.state["setting_choice"] = choice
     if choice == "1":
-        await matcher.send("请输入新的推送抓取时间，例如：每日04:00、每3天04:00、周一04:00")
+        await matcher.send("请输入新的推送抓取时间，例如：每天04:00、每隔06:00、每3天04:00、周一04:00")
     else:
         await matcher.send("请输入新的压缩包密码。输入 无 则清除当前仓库密码。")
 

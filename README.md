@@ -73,7 +73,7 @@ plugins = ["nonebot_plugin_git_poller"]
 
 | 配置项 | 必填 | 默认值 | 说明 |
 | --- | --- | --- | --- |
-| `git_poller_default_schedule` | 否 | `每日04:00` | 新关注仓库的默认定时规则；留空关闭默认定时注册。 |
+| `git_poller_default_schedule` | 否 | `每天04:00` | 新关注仓库的默认定时规则；留空关闭默认定时注册。 |
 | `git_poller_timezone` | 否 | `+8` | 定时任务 UTC 偏移量，含半点时区，例如 `+8.5` 或 `-3.5`。 |
 | `git_poller_proxy` | 否 | 空 | HTTP/HTTPS Git 拉取代理。 |
 | `git_poller_timeout` | 否 | `60.0` | HTTP/HTTPS Git 拉取超时，单位秒。 |
@@ -111,12 +111,13 @@ plugins = ["nonebot_plugin_git_poller"]
 ```text
 定时格式
 
-每日hh:mm
+每天hh:mm
+每隔hh:mm
 每x天hh:mm
 周xhh:mm
 ```
 
-`每x天` 的 `x` 使用 1 到 30 的整数；`周x` 只支持汉字 `一二三四五六日/天`
+`每隔` 的时间范围是 `00:01` 到 `23:59`；`每x天` 的 `x` 使用 1 到 30 的整数；`周x` 只支持汉字 `一二三四五六日/天`
 
 `/仓库列表` 显示当前群关注的仓库 Git 链接、分支、计划时间、SHA 和实际使用的压缩包密码。
 

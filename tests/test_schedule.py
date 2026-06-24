@@ -26,11 +26,42 @@ def _load_schedule_module():
 
 def test_parse_daily_schedule():
     schedule = _load_schedule_module()
-    spec = schedule.parse_schedule("每日04:30")
+    spec = schedule.parse_schedule("每天04:30")
 
     assert spec.trigger == "cron"
     assert spec.trigger_kwargs["hour"] == 4
     assert spec.trigger_kwargs["minute"] == 30
+
+
+def test_parse_interval_schedule(monkeypatch):
+    schedule = _load_schedule_module()
+
+    class _FixedDateTime(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return cls(2026, 6, 20, 5, 0, tzinfo=tz)
+
+    monkeypatch.setattr(schedule, "datetime", _FixedDateTime)
+    spec = schedule.parse_schedule("每隔06:00")
+
+    assert spec.trigger == "interval"
+    assert spec.trigger_kwargs["hours"] == 6
+    assert spec.trigger_kwargs["minutes"] == 0
+    assert spec.trigger_kwargs["start_date"].isoformat() == "2026-06-20T11:00:00+08:00"
+
+
+def test_parse_interval_schedule_rejects_zero_duration():
+    schedule = _load_schedule_module()
+
+    with pytest.raises(ValueError, match="00:01 到 23:59"):
+        schedule.parse_schedule("每隔00:00")
+
+
+def test_parse_interval_schedule_rejects_twenty_four_hours():
+    schedule = _load_schedule_module()
+
+    with pytest.raises(ValueError, match="定时时间必须在 00:00 到 23:59 之间。"):
+        schedule.parse_schedule("每隔24:00")
 
 
 def test_parse_weekly_schedule_with_chinese_weekday():
@@ -55,17 +86,17 @@ def test_parse_weekly_schedule_with_sunday_alias():
 
 def test_parse_schedule_accepts_signed_utc_offset():
     schedule = _load_schedule_module()
-    spec = schedule.parse_schedule("每日04:30", "+8")
+    spec = schedule.parse_schedule("每天04:30", "+8")
 
-    assert spec.description == "每日 04:30 (UTC+08:00)"
+    assert spec.description == "每天 04:30 (UTC+08:00)"
     assert str(spec.trigger_kwargs["timezone"]) == "UTC+08:00"
 
 
 def test_parse_schedule_treats_unsigned_offset_as_positive():
     schedule = _load_schedule_module()
-    spec = schedule.parse_schedule("每日04:30", "8")
+    spec = schedule.parse_schedule("每天04:30", "8")
 
-    assert spec.description == "每日 04:30 (UTC+08:00)"
+    assert spec.description == "每天 04:30 (UTC+08:00)"
     assert spec.trigger_kwargs["timezone"].utcoffset(None).total_seconds() == 28800
 
 
@@ -79,21 +110,21 @@ def test_parse_schedule_accepts_negative_utc_offset():
 
 def test_parse_schedule_accepts_india_utc_offset_exception():
     schedule = _load_schedule_module()
-    spec = schedule.parse_schedule("每日04:30", "5.5")
+    spec = schedule.parse_schedule("每天04:30", "5.5")
 
-    assert spec.description == "每日 04:30 (UTC+05:30)"
+    assert spec.description == "每天 04:30 (UTC+05:30)"
     assert spec.trigger_kwargs["timezone"].utcoffset(None).total_seconds() == 19800
 
 
 def test_parse_schedule_accepts_known_half_hour_utc_offsets():
     schedule = _load_schedule_module()
 
-    negative = schedule.parse_schedule("每日04:30", "-3.5")
-    positive = schedule.parse_schedule("每日04:30", "9.5")
+    negative = schedule.parse_schedule("每天04:30", "-3.5")
+    positive = schedule.parse_schedule("每天04:30", "9.5")
 
-    assert negative.description == "每日 04:30 (UTC-03:30)"
+    assert negative.description == "每天 04:30 (UTC-03:30)"
     assert negative.trigger_kwargs["timezone"].utcoffset(None).total_seconds() == -12600
-    assert positive.description == "每日 04:30 (UTC+09:30)"
+    assert positive.description == "每天 04:30 (UTC+09:30)"
     assert positive.trigger_kwargs["timezone"].utcoffset(None).total_seconds() == 34200
 
 
@@ -101,21 +132,21 @@ def test_parse_schedule_rejects_old_timezone_name():
     schedule = _load_schedule_module()
 
     with pytest.raises(ValueError, match="无效 UTC 偏移"):
-        schedule.parse_schedule("每日04:30", "Asia/Shanghai")
+        schedule.parse_schedule("每天04:30", "Asia/Shanghai")
 
 
 def test_parse_schedule_rejects_unapproved_fractional_offset():
     schedule = _load_schedule_module()
 
     with pytest.raises(ValueError, match="无效 UTC 偏移"):
-        schedule.parse_schedule("每日04:30", "8.5")
+        schedule.parse_schedule("每天04:30", "8.5")
 
 
 def test_parse_schedule_rejects_zero_padded_offset():
     schedule = _load_schedule_module()
 
     with pytest.raises(ValueError, match="无效 UTC 偏移"):
-        schedule.parse_schedule("每日04:30", "+08")
+        schedule.parse_schedule("每天04:30", "+08")
 
 
 def test_parse_interval_days_schedule(monkeypatch):
@@ -193,7 +224,7 @@ def test_dash_time_is_not_supported():
     schedule = _load_schedule_module()
 
     with pytest.raises(ValueError, match="定时格式应为"):
-        schedule.parse_schedule("每日04-30")
+        schedule.parse_schedule("每天04-30")
 
 
 def test_invalid_schedule_raises():

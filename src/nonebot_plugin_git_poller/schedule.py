@@ -6,12 +6,14 @@ import re
 from typing import Any
 
 
-_DAILY_PATTERN = re.compile(r"^每日(\d{1,2}):(\d{2})$")
+_DAILY_PATTERN = re.compile(r"^每天(\d{1,2}):(\d{2})$")
+_INTERVAL_PATTERN = re.compile(r"^每隔(\d{1,2}):(\d{2})$")
 _INTERVAL_DAYS_PATTERN = re.compile(r"^每([1-9]\d*)天(\d{1,2}):(\d{2})$")
 _WEEKLY_PATTERN = re.compile(r"^周([一二三四五六日天])(\d{1,2}):(\d{2})$")
 _UTC_OFFSET_PATTERN = re.compile(r"^([+-]?)(0|[1-9]\d?)(?:\.5)?$")
 _INTERVAL_ANCHOR_ORDINAL = date(1970, 1, 1).toordinal()
 _MAX_INTERVAL_DAYS = 30
+_MIN_INTERVAL_MINUTES = 1
 _WEEKDAY_MAP = {
     "一": "mon",
     "二": "tue",
@@ -71,7 +73,29 @@ def parse_schedule(value: str, timezone_name: str = "+8") -> ScheduleSpec | None
                 "minute": minute,
                 "timezone": schedule_timezone,
             },
-            description=f"每日 {_format_time(hour, minute)} ({timezone_label})",
+            description=f"每天 {_format_time(hour, minute)} ({timezone_label})",
+        )
+
+    interval = _INTERVAL_PATTERN.fullmatch(raw)
+    if interval:
+        hour, minute = _parse_time(interval.group(1), interval.group(2))
+        interval_minutes = hour * 60 + minute
+        if interval_minutes < _MIN_INTERVAL_MINUTES:
+            raise ValueError("每隔时间必须在 00:01 到 23:59 之间。")
+        return ScheduleSpec(
+            raw=raw,
+            trigger="interval",
+            trigger_kwargs={
+                "hours": hour,
+                "minutes": minute,
+                "start_date": _next_interval_start_datetime(
+                    hour,
+                    minute,
+                    schedule_timezone,
+                ),
+                "timezone": schedule_timezone,
+            },
+            description=f"每隔 {_format_time(hour, minute)} ({timezone_label})",
         )
 
     interval_days = _INTERVAL_DAYS_PATTERN.fullmatch(raw)
@@ -117,7 +141,8 @@ def parse_schedule(value: str, timezone_name: str = "+8") -> ScheduleSpec | None
         )
 
     raise ValueError(
-        "定时格式应为 每日hh:mm、每x天hh:mm 或 周xhh:mm，"
+        "定时格式应为 每天hh:mm、每隔hh:mm、每x天hh:mm 或 周xhh:mm，"
+        "每隔hh:mm 的范围是 00:01 到 23:59，"
         f"天数 x 使用 1 到 {_MAX_INTERVAL_DAYS} 的整数，"
         "周 x 使用一二三四五六日/天。"
     )
@@ -182,3 +207,12 @@ def _next_interval_start_date(
     if offset:
         candidate += timedelta(days=days - offset)
     return candidate
+
+
+def _next_interval_start_datetime(
+    hour: int,
+    minute: int,
+    schedule_timezone: tzinfo,
+) -> datetime:
+    now = datetime.now(schedule_timezone).replace(second=0, microsecond=0)
+    return now + timedelta(hours=hour, minutes=minute)

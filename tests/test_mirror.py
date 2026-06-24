@@ -197,7 +197,7 @@ def _service(
 
 def _config(**overrides):
     values = {
-        "git_poller_default_schedule": "每日04:00",
+        "git_poller_default_schedule": "每天04:00",
         "git_poller_timezone": "8",
         "git_poller_proxy": None,
         "git_poller_timeout": 60.0,
@@ -277,7 +277,7 @@ def test_pull_repo_builds_archive_without_marking_success():
         models.Subscription(
             url=identity.url,
             branch="main",
-            schedule="每日04:00",
+            schedule="每天04:00",
             last_success_sha="oldsha123",
         ),
     )
@@ -308,7 +308,7 @@ def test_pull_repo_without_branch_uses_unique_local_subscription():
         models.Subscription(
             url=identity.url,
             branch="main",
-            schedule="每日04:00",
+            schedule="每天04:00",
             last_success_sha="oldsha123",
         ),
     )
@@ -342,7 +342,7 @@ def test_list_group_subscriptions_does_not_wait_for_slow_pull_fetch():
         models.Subscription(
             url=identity.url,
             branch="main",
-            schedule="每日04:00",
+            schedule="每天04:00",
             last_success_sha="oldsha123",
         ),
     )
@@ -376,7 +376,7 @@ def test_unbranched_repo_command_requires_branch_when_multiple_subscriptions_exi
             models.Subscription(
                 url=identity.url,
                 branch=branch,
-                schedule="每日04:00",
+                schedule="每天04:00",
                 last_success_sha="oldsha123",
             ),
         )
@@ -401,7 +401,7 @@ def test_pull_repo_removes_previous_archive_before_building_new_one():
         models.Subscription(
             url=identity.url,
             branch="main",
-            schedule="每日04:00",
+            schedule="每天04:00",
             last_success_sha="oldsha123",
             last_archive_path="/tmp/old.7z",
         ),
@@ -425,7 +425,7 @@ def test_cleanup_unsubscribed_repo_skips_active_subscription():
     state.upsert_subscription(
         10001,
         identity.key,
-        models.Subscription(url=identity.url, branch="main", schedule="每日04:00"),
+        models.Subscription(url=identity.url, branch="main", schedule="每天04:00"),
     )
 
     assert service.cleanup_unsubscribed_repo(identity.key) is False
@@ -446,7 +446,7 @@ def test_unfollow_repo_removes_subscription_archive_even_when_repo_still_subscri
             models.Subscription(
                 url=identity.url,
                 branch="main",
-                schedule="每日04:00",
+                schedule="每天04:00",
                 last_archive_path=archive_path,
             ),
         )
@@ -480,7 +480,7 @@ def test_cleanup_orphaned_storage_removes_only_unsubscribed_cache_and_archives()
     state.upsert_subscription(
         10001,
         active.key,
-        models.Subscription(url=active.url, branch="main", schedule="每日04:00"),
+        models.Subscription(url=active.url, branch="main", schedule="每天04:00"),
     )
     git_cache.cached_keys = {active.key, "orphan-key"}
 
@@ -504,7 +504,7 @@ def test_summarize_repo_builds_payload_without_marking_success():
         models.Subscription(
             url=identity.url,
             branch="main",
-            schedule="每日04:00",
+            schedule="每天04:00",
             last_success_sha="oldsha123",
         ),
     )
@@ -528,7 +528,7 @@ def test_summarize_repo_reports_same_head_with_empty_commits():
         models.Subscription(
             url=identity.url,
             branch="main",
-            schedule="每日04:00",
+            schedule="每天04:00",
             last_success_sha="newsha1234567890",
         ),
     )
@@ -551,12 +551,12 @@ def test_poll_schedule_skips_unchanged_subscriptions():
         models.Subscription(
             url=identity.url,
             branch="main",
-            schedule="每日04:00",
+            schedule="每天04:00",
             last_success_sha="newsha1234567890",
         ),
     )
 
-    results = asyncio.run(_collect_async(service.poll_schedule("每日04:00")))
+    results = asyncio.run(_collect_async(service.poll_schedule("每天04:00")))
 
     assert results == []
 
@@ -573,12 +573,12 @@ def test_poll_schedule_returns_changed_subscriptions_per_group():
             models.Subscription(
                 url=identity.url,
                 branch="main",
-                schedule="每日04:00",
+                schedule="每天04:00",
                 last_success_sha=f"oldsha-{group_id}",
             ),
         )
 
-    results = asyncio.run(_collect_async(service.poll_schedule("每日04:00")))
+    results = asyncio.run(_collect_async(service.poll_schedule("每天04:00")))
 
     assert [delivery.result.group_id for delivery in results] == [10001, 10002]
     assert [delivery.result.payload.previous_sha for delivery in results] == [
@@ -601,13 +601,13 @@ def test_poll_schedule_builds_archives_as_results_are_consumed():
             models.Subscription(
                 url=identity.url,
                 branch="main",
-                schedule="每日04:00",
+                schedule="每天04:00",
                 last_success_sha=f"oldsha-{group_id}",
             ),
         )
 
     async def _first_result():
-        async for result in service.poll_schedule("每日04:00"):
+        async for result in service.poll_schedule("每天04:00"):
             return result
         raise AssertionError("expected one scheduled result")
 
@@ -630,13 +630,13 @@ def test_poll_schedule_continues_after_subscription_failure():
             models.Subscription(
                 url=identity.url,
                 branch="main",
-                schedule="每日04:00",
+                schedule="每天04:00",
                 last_success_sha="oldsha123",
             ),
         )
     git_cache.fail_fetch_keys = {first.key}
 
-    results = asyncio.run(_collect_async(service.poll_schedule("每日04:00")))
+    results = asyncio.run(_collect_async(service.poll_schedule("每天04:00")))
 
     assert len(results) == 1
     assert results[0].result.repo_key == second.key
